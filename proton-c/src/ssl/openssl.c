@@ -194,6 +194,7 @@ static int ssl_failed(pn_ssl_t *ssl)
     ERR_error_string_n( ssl_err, buf, sizeof(buf) );
   }
   _log_ssl_error(NULL);    // spit out any remaining errors to the log file
+  ssl->transport->tail_closed = true;
   return pn_error_format( ssl->transport->error, PN_ERR, "SSL Failure: %s", buf );
 }
 
@@ -340,7 +341,7 @@ static int verify_callback(int preverify_ok, X509_STORE_CTX *ctx)
 
 // this code was generated using the command:
 // "openssl dhparam -C -2 2048"
-static DH *get_dh2048()
+static DH *get_dh2048(void)
 {
   static unsigned char dh2048_p[]={
     0xAE,0xF7,0xE9,0x66,0x26,0x7A,0xAC,0x0A,0x6F,0x1E,0xCD,0x81,
@@ -876,13 +877,13 @@ static ssize_t process_input_ssl( pn_io_layer_t *io_layer, const char *input_dat
     // write incoming data to app layer
 
     if (!ssl->app_input_closed) {
-      char *data = ssl->inbuf;
       if (ssl->in_count > 0 || ssl->ssl_closed) {  /* if ssl_closed, send 0 count */
         pn_io_layer_t *io_next = ssl->io_layer->next;
-        ssize_t consumed = io_next->process_input( io_next, data, ssl->in_count);
+        ssize_t consumed = io_next->process_input( io_next, ssl->inbuf, ssl->in_count);
         if (consumed > 0) {
           ssl->in_count -= consumed;
-          data += consumed;
+          if (ssl->in_count)
+            memmove( ssl->inbuf, ssl->inbuf + consumed, ssl->in_count );
           work_pending = true;
           _log( ssl, "Application consumed %d bytes from peer\n", (int) consumed );
         } else if (consumed < 0) {
@@ -905,7 +906,7 @@ static ssize_t process_input_ssl( pn_io_layer_t *io_layer, const char *input_dat
               // no max frame limit - grow it.
               char *newbuf = (char *)malloc( max_frame );
               if (newbuf) {
-                ssl->in_size *= max_frame;
+                ssl->in_size = max_frame;
                 memmove( newbuf, ssl->inbuf, ssl->in_count );
                 free( ssl->inbuf );
                 ssl->inbuf = newbuf;
@@ -922,8 +923,6 @@ static ssize_t process_input_ssl( pn_io_layer_t *io_layer, const char *input_dat
           }
         }
       }
-      if (ssl->in_count > 0 && data != ssl->inbuf)
-        memmove( ssl->inbuf, data, ssl->in_count );
     }
 
   } while (work_pending);
