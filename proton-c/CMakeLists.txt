@@ -44,11 +44,14 @@ endif()
 # Set the default SSL/TLS implementation
 find_package(OpenSSL)
 
+find_package (PythonInterp REQUIRED)
+
 set(ssl_impl, none)
 if (OPENSSL_FOUND)
   set(ssl_impl openssl)
 endif(OPENSSL_FOUND)
 set(SSL_IMPL ${ssl_impl} CACHE STRING "Library to use for SSL/TLS support. Valid values: 'none','openssl'")
+mark_as_advanced (SSL_IMPL)
 
 configure_file (
   "${CMAKE_CURRENT_SOURCE_DIR}/include/proton/version.h.in"
@@ -62,20 +65,24 @@ include_directories ("${CMAKE_CURRENT_SOURCE_DIR}/../examples/include")
 
 add_custom_command (
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/encodings.h
-  COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/env.py PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR} python ${CMAKE_CURRENT_SOURCE_DIR}/src/codec/encodings.h.py > ${CMAKE_CURRENT_BINARY_DIR}/encodings.h
+  COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/env.py PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR} ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/codec/encodings.h.py > ${CMAKE_CURRENT_BINARY_DIR}/encodings.h
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/codec/encodings.h.py
   )
 
 add_custom_command (
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/protocol.h
-  COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/env.py PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR} python ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol.h.py > ${CMAKE_CURRENT_BINARY_DIR}/protocol.h
+  COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/env.py PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR} ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol.h.py > ${CMAKE_CURRENT_BINARY_DIR}/protocol.h
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol.h.py
   )
 
 # Select driver
 if(PN_WINAPI)
+  set (pn_io_impl src/windows/io.c)
+  set (pn_selector_impl src/windows/selector.c)
   set (pn_driver_impl src/windows/driver.c)
 else(PN_WINAPI)
+  set (pn_io_impl src/posix/io.c)
+  set (pn_selector_impl src/posix/selector.c)
   set (pn_driver_impl src/posix/driver.c)
 endif(PN_WINAPI)
 
@@ -189,6 +196,7 @@ if (CMAKE_COMPILER_IS_GNUCC)
   endif (ENABLE_WARNING_ERROR)
   set (COMPILE_WARNING_FLAGS "${WERROR} -Wall -pedantic-errors")
   if (NOT BUILD_WITH_CXX)
+    set (COMPILE_WARNING_FLAGS "${COMPILE_WARNING_FLAGS} -Wstrict-prototypes")
     set (COMPILE_LANGUAGE_FLAGS "-std=c99")
     set (COMPILE_PLATFORM_FLAGS "-std=gnu99")
 
@@ -215,6 +223,17 @@ if (MSVC)
 	set(CMAKE_DEBUG_POSTFIX "d")
 endif (MSVC)
 
+macro (pn_absolute_install_dir NAME VALUE PREFIX)
+  if(IS_ABSOLUTE ${VALUE})
+    set(${NAME} "${VALUE}")
+  elseif(IS_ABSOLUTE ${PREFIX})
+    set(${NAME} "${PREFIX}/${VALUE}")
+  else()
+    set(${NAME} "${CMAKE_BINARY_DIR}/${PREFIX}/${VALUE}")
+  endif(IS_ABSOLUTE ${VALUE})
+  get_filename_component(${NAME} ${${NAME}} ABSOLUTE)
+endmacro()
+
 find_package(SWIG)
 if (SWIG_FOUND)
   add_subdirectory(bindings)
@@ -222,10 +241,11 @@ endif (SWIG_FOUND)
 
 add_subdirectory(docs/api)
 add_subdirectory(docs/man)
-add_subdirectory(../examples/messenger/c examples/messenger/c)
 add_subdirectory(../tests/tools/apps/c ../tests/tools/apps/c)
 
 set (qpid-proton-platform
+  ${pn_io_impl}
+  ${pn_selector_impl}
   ${pn_driver_impl}
   src/platform.c
   ${pn_driver_ssl_impl}
@@ -249,6 +269,7 @@ set (qpid-proton-core
 
   src/dispatcher/dispatcher.c
   src/engine/engine.c
+  src/engine/event.c
   src/transport/transport.c
   src/message/message.c
   src/sasl/sasl.c
@@ -257,6 +278,7 @@ set (qpid-proton-core
   src/messenger/subscription.c
   src/messenger/store.c
   src/messenger/transform.c
+  src/selectable.c
 
   ${CMAKE_CURRENT_BINARY_DIR}/encodings.h
   ${CMAKE_CURRENT_BINARY_DIR}/protocol.h
@@ -325,12 +347,12 @@ pn_c_files (${qpid-proton-core} ${qpid-proton-platform} src/proton.c src/proton-
 # Install executables and libraries
 install (TARGETS proton proton-dump
   RUNTIME DESTINATION bin
-  ARCHIVE DESTINATION bin
+  ARCHIVE DESTINATION ${LIB_INSTALL_DIR}
   LIBRARY DESTINATION ${LIB_INSTALL_DIR})
 install (TARGETS qpid-proton
   EXPORT  proton
   RUNTIME DESTINATION bin
-  ARCHIVE DESTINATION bin
+  ARCHIVE DESTINATION ${LIB_INSTALL_DIR}
   LIBRARY DESTINATION ${LIB_INSTALL_DIR})
 
 # Install header files
@@ -339,24 +361,12 @@ install (FILES ${headers} DESTINATION ${INCLUDE_INSTALL_DIR}/proton)
 install (FILES  ${CMAKE_CURRENT_BINARY_DIR}/include/proton/version.h
          DESTINATION ${INCLUDE_INSTALL_DIR}/proton)
 
+pn_absolute_install_dir(PREFIX "." ${CMAKE_INSTALL_PREFIX})
+pn_absolute_install_dir(EXEC_PREFIX "." ${CMAKE_INSTALL_PREFIX})
+pn_absolute_install_dir(LIBDIR ${LIB_INSTALL_DIR} ${CMAKE_INSTALL_PREFIX})
+pn_absolute_install_dir(INCLUDEDIR ${INCLUDE_INSTALL_DIR} ${CMAKE_INSTALL_PREFIX})
+
 # Pkg config file
-# make sure the install prefix is absolute
-set(INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
-
-macro (pn_pkgconfig_dir NAME VALUE PREFIX)
-  if(IS_ABSOLUTE ${VALUE})
-    set(${NAME} "${VALUE}")
-  else(IS_ABSOLUTE ${VALUE})
-    set(${NAME} "${PREFIX}/${VALUE}")
-  endif(IS_ABSOLUTE ${VALUE})
-  get_filename_component(${NAME} ${${NAME}} ABSOLUTE)
-endmacro(pn_pkgconfig_dir)
-
-pn_pkgconfig_dir(PREFIX ${INSTALL_PREFIX} ${INSTALL_PREFIX})
-pn_pkgconfig_dir(EXEC_PREFIX ${INSTALL_PREFIX} ${INSTALL_PREFIX})
-pn_pkgconfig_dir(LIBDIR ${LIB_INSTALL_DIR} ${INSTALL_PREFIX})
-pn_pkgconfig_dir(INCLUDEDIR ${INCLUDE_INSTALL_DIR} ${INSTALL_PREFIX})
-
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/src/libqpid-proton.pc.in
   ${CMAKE_CURRENT_BINARY_DIR}/libqpid-proton.pc @ONLY)
@@ -364,23 +374,24 @@ install (FILES
   ${CMAKE_CURRENT_BINARY_DIR}/libqpid-proton.pc
   DESTINATION ${LIB_INSTALL_DIR}/pkgconfig)
 
+if (DEFINED CMAKE_IMPORT_LIBRARY_PREFIX)
+set(PROTONLIB ${CMAKE_IMPORT_LIBRARY_PREFIX}qpid-proton${CMAKE_IMPORT_LIBRARY_SUFFIX})
+set(PROTONLIBDEBUG ${CMAKE_IMPORT_LIBRARY_PREFIX}qpid-proton${CMAKE_DEBUG_POSTFIX}${CMAKE_IMPORT_LIBRARY_SUFFIX})
+else ()
+set(PROTONLIB ${CMAKE_SHARED_LIBRARY_PREFIX}qpid-proton${CMAKE_SHARED_LIBRARY_SUFFIX})
+set(PROTONLIBDEBUG ${CMAKE_SHARED_LIBRARY_PREFIX}qpid-proton${CMAKE_DEBUG_POSTFIX}${CMAKE_SHARED_LIBRARY_SUFFIX})
+endif ()
+
 configure_file(
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/libqpid-proton.cmake.in
-  ${CMAKE_CURRENT_BINARY_DIR}/libqpid-proton.cmake @ONLY)
-install (FILES 
-  ${CMAKE_CURRENT_BINARY_DIR}/libqpid-proton.cmake
-  DESTINATION ${LIB_INSTALL_DIR}/proton.cmake)
-
-install (EXPORT proton 
-  FILE proton-config.cmake 
-  DESTINATION ${LIB_INSTALL_DIR}/proton.cmake)
-
-file(WRITE 
-  ${CMAKE_CURRENT_BINARY_DIR}/proton.cmake/proton-config-version.cmake
-  "set(PACKAGE_VERSION ${PN_VERSION})\n")
-install (FILES 
-  ${CMAKE_CURRENT_BINARY_DIR}/proton.cmake/proton-config-version.cmake
-  DESTINATION ${LIB_INSTALL_DIR}/proton.cmake)
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/ProtonConfig.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/ProtonConfig.cmake @ONLY)
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/ProtonConfigVersion.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/ProtonConfigVersion.cmake @ONLY)
+install (FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/ProtonConfig.cmake
+  ${CMAKE_CURRENT_BINARY_DIR}/ProtonConfigVersion.cmake
+  DESTINATION ${LIB_INSTALL_DIR}/cmake/Proton)
 
 # CTest
 
@@ -417,13 +428,17 @@ endif (CMAKE_SYSTEM_NAME STREQUAL Windows)
 
 set (env_py "${CMAKE_CURRENT_SOURCE_DIR}/env.py" )
 
-find_program(VALGRIND valgrind DOC "Location of the valgrind program")
+find_program(VALGRIND_EXE valgrind DOC "Location of the valgrind program")
 option(ENABLE_VALGRIND "Use valgrind to detect run-time problems" ON)
-if (ENABLE_VALGRIND AND NOT VALGRIND)
-  message(STATUS "Can't locate the valgrind command; no run-time error detection")
-else (ENABLE_VALGRIND AND NOT VALGRIND)
-  set (VALGRIND_ENV "VALGRIND=1")
-endif (ENABLE_VALGRIND AND NOT VALGRIND)
+if (ENABLE_VALGRIND)
+  if (NOT VALGRIND_EXE)
+    message(STATUS "Can't locate the valgrind command; no run-time error detection")
+  else ()
+    set (VALGRIND_ENV "VALGRIND=${VALGRIND_EXE}")
+  endif ()
+endif (ENABLE_VALGRIND)
+
+mark_as_advanced (VALGRIND_EXE)
 
 # c tests:
 
@@ -441,13 +456,13 @@ set_path (py_pythonpath "$ENV{PYTHONPATH}:${py_root}:${py_src}:${py_bin}:${py_bl
 if (CMAKE_SYSTEM_NAME STREQUAL Windows)
   set_path (py_pythonpath "${py_pythonpath}:${py_bin}${bld_suffix}")
 endif (CMAKE_SYSTEM_NAME STREQUAL Windows)
-add_test (python-test python ${env_py}
+add_test (python-test ${PYTHON_EXECUTABLE} ${env_py}
          "PATH=${py_path}" "PYTHONPATH=${py_pythonpath}" ${VALGRIND_ENV}
          ${PYTHON_EXECUTABLE} "${py_root}/proton-test")
 set_tests_properties(python-test PROPERTIES PASS_REGULAR_EXPRESSION "Totals: .* 0 failed")
 
-find_program(ruby_exe "ruby")
-if (ruby_exe)
+find_program(RUBY_EXE "ruby")
+if (RUBY_EXE)
   set (rb_root "${pn_test_root}/ruby")
   set (rb_src "${CMAKE_CURRENT_SOURCE_DIR}/bindings/ruby")
   set (rb_lib "${CMAKE_CURRENT_SOURCE_DIR}/bindings/ruby/lib")
@@ -457,20 +472,30 @@ if (ruby_exe)
   set (rb_rubylib "${rb_root}:${rb_src}:${rb_bin}:${rb_bld}:${rb_lib}")
 
   # ruby unit tests:  tests/ruby/proton-test
-  add_test (ruby-unit-test python ${env_py} "PATH=${rb_path}" "RUBYLIB=${rb_rubylib}"
-    "${rb_root}/proton-test")
+  # only enable the tests if the Ruby gem dependencies were found
+  if (DEFAULT_RUBY_TESTING)
+    add_test (ruby-unit-test ${PYTHON_EXECUTABLE} ${env_py} "PATH=${rb_path}" "RUBYLIB=${rb_rubylib}"
+      "${rb_root}/proton-test")
 
-  # ruby spec tests
-  find_program(rspec_exe rspec)
-  if (rspec_exe)
-    add_test (NAME ruby-spec-test
-              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bindings/ruby
-              COMMAND python ${env_py} "PATH=${rb_path}" "RUBYLIB=${rb_rubylib}"
-                      ${rspec_exe})
+    # ruby spec tests
+    find_program(RSPEC_EXE rspec)
+    if (RSPEC_EXE)
+      add_test (NAME ruby-spec-test
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bindings/ruby
+                COMMAND ${PYTHON_EXECUTABLE} ${env_py} "PATH=${rb_path}" "RUBYLIB=${rb_rubylib}"
+                        ${RSPEC_EXE})
 
-  else(rspec_exe)
-    message (STATUS "Cannot find rspec, skipping rspec tests")
-  endif(rspec_exe)
-else (ruby_exe)
+    else(RSPEC_EXE)
+      message (STATUS "Cannot find rspec, skipping rspec tests")
+    endif(RSPEC_EXE)
+  else (DEFAULT_RUBY_TESTING)
+    message(STATUS "Skipping Ruby tests: missing dependencies")
+  endif (DEFAULT_RUBY_TESTING)
+else (RUBY_EXE)
   message (STATUS "Cannot find ruby, skipping ruby tests")
-endif (ruby_exe)
+endif (RUBY_EXE)
+
+mark_as_advanced (RUBY_EXE RSPEC_EXE)
+
+# build examples to make sure they still work
+add_subdirectory(../examples ../examples)

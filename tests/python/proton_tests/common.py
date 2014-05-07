@@ -93,7 +93,7 @@ def isSSLPresent():
         # SSL libraries not installed
         return False
 
-class Test:
+class Test(object):
 
   def __init__(self, name):
     self.name = name
@@ -333,11 +333,10 @@ class MessengerApp(object):
         self.certificate = None
         self.privatekey = None
         self.password = None
+        self._output = None
 
     def start(self, verbose=False):
         """ Begin executing the test """
-        if sys.platform.startswith("java"):
-            raise Skipped("Skipping soak tests - not supported under Jython")
         cmd = self.cmdline()
         self._verbose = verbose
         if self._verbose:
@@ -365,7 +364,14 @@ class MessengerApp(object):
 
     def stdout(self):
         #self._process.communicate()[0]
+        if not self._output or not self._output[0]:
+            return "*** NO STDOUT ***"
         return self._output[0]
+
+    def stderr(self):
+        if not self._output or not self._output[1]:
+            return "*** NO STDERR ***"
+        return self._output[1]
 
     def cmdline(self):
         if not self._cmdline:
@@ -525,7 +531,7 @@ class MessengerSenderValgrind(MessengerSenderC):
         if not suppressions:
             suppressions = os.path.join(os.path.dirname(__file__),
                                         "valgrind.supp" )
-        self._command = ["valgrind", "--error-exitcode=1", "--quiet",
+        self._command = [os.environ["VALGRIND"], "--error-exitcode=1", "--quiet",
                          "--trace-children=yes", "--leak-check=full",
                          "--suppressions=%s" % suppressions] + self._command
 
@@ -544,7 +550,7 @@ class MessengerReceiverValgrind(MessengerReceiverC):
         if not suppressions:
             suppressions = os.path.join(os.path.dirname(__file__),
                                         "valgrind.supp" )
-        self._command = ["valgrind", "--error-exitcode=1", "--quiet",
+        self._command = [os.environ["VALGRIND"], "--error-exitcode=1", "--quiet",
                          "--trace-children=yes", "--leak-check=full",
                          "--suppressions=%s" % suppressions] + self._command
 

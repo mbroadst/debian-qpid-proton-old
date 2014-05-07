@@ -24,9 +24,7 @@
 
 #include <proton/import_export.h>
 #include <sys/types.h>
-#ifndef __cplusplus
-#include <stdbool.h>
-#endif
+#include <proton/type_compat.h>
 #include <proton/engine.h>
 
 #ifdef __cplusplus
@@ -41,6 +39,10 @@ extern "C" {
  * peers. The peer acting as the SASL Client must provide
  * authentication credentials. The peer acting as the SASL Server must
  * provide authentication against the received credentials.
+ *
+ * @defgroup sasl SASL
+ * @ingroup transport
+ * @{
  */
 
 typedef struct pn_sasl_t pn_sasl_t;
@@ -166,6 +168,8 @@ PN_EXTERN void pn_sasl_done(pn_sasl_t *sasl, pn_sasl_outcome_t outcome);
  * @todo
  */
 PN_EXTERN pn_sasl_outcome_t pn_sasl_outcome(pn_sasl_t *sasl);
+
+/** @} */
 
 #ifdef __cplusplus
 }

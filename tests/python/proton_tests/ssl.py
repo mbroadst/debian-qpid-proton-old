@@ -18,7 +18,10 @@
 #
 
 import os, common
+import random
+import string
 import subprocess
+
 from proton import *
 from common import Skipped, pump
 
@@ -817,6 +820,10 @@ class MessengerSSLTests(common.Test):
                                 key="server-private-key.pem",
                                 password="server-password",
                                 exception=None):
+        import sys
+        # java doesn't do validation in the same way (yet)
+        if exception and "java" in sys.platform:
+            raise Skipped()
         self.server.certificate = _testpath(cert)
         self.server.private_key = _testpath(key)
         self.server.password = password
@@ -873,7 +880,9 @@ class MessengerSSLTests(common.Test):
 
         msg = Message()
         msg.address = "amqps://127.0.0.1:12345"
-        msg.body = "Hello World!"
+        # make sure a large, uncompressible message body works!
+        msg.body = "".join(random.choice(string.ascii_letters)
+                           for x in range(10099))
         trk = self.client.put(msg)
         self.client.send()
 
