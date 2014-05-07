@@ -12,11 +12,7 @@ Build-Depends: debhelper (>= 8.0.0),
 	       libsslcommon2-dev,
 	       python-epydoc,
 	       python (>=2.6.6-3~),
-	       python-dev (>=2.6.6-3~),
-	       ruby,
-	       ruby-dev,
-               ruby-rspec,
-               ruby-simplecov
+	       python-dev (>=2.6.6-3~)
 Standards-Version: 3.9.3
 Homepage: http://qpid.apache.org/proton
 Vcs-Browser: http://git.debian.org/?p=pkg-middleware/qpid-proton.git
