@@ -1,0 +1,12 @@
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: qpid-proton
+Source: http://qpid.apache.org/proton
+
+Files: *
+Copyright: 2011 The Apache Foundation
+License: Apache-2.0
+
+
+Files: examples/include/pncompat/internal/*
+Copyright: 2002-2003 Mark K. Kim
+License: BSD-3-Clause

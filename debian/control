@@ -1,0 +1,59 @@
+Source: qpid-proton
+Section: libs
+Priority: optional
+Maintainer: Darryl L. Pierce <dpierce@redhat.com>
+Build-Depends: debhelper (>= 8.0.0),
+               cmake,
+	       swig,
+	       pkg-config,
+	       doxygen,
+	       uuid-dev,
+	       libsslcommon2-dev,
+	       python-epydoc,
+	       python (>=2.6.6-3~),
+	       python-dev (>=2.6.6-3~),
+	       ruby,
+	       ruby-dev
+Standards-Version: 3.9.3
+Homepage: http://qpid.apache.org/proton
+Vcs-Git: git://github.com/mcpierce/Proton.git
+Vcs-Browser: http://github.com/mcpierce/Proton
+
+Package: qpid-proton
+Architecture: any
+Depends: libqpid-proton (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
+Description: Qpid Proton messaging tools
+
+Package: libqpid-proton
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Pre-Depends: multiarch-support
+Description: C libraries for Qpid Proton.
+
+Package: libqpid-proton-dev
+Architecture: any
+Section: libdevel
+Depends: libqpid-proton (= ${binary:Version}), ${misc:Depends}
+Multi-Arch: same
+Description: Development libraries for writing messaging apps with Qpid Proton
+
+Package: libqpid-proton-dev-examples
+Architecture: all
+Section: libdevel
+depends: libqpid-proton-dev (= ${binary:Version})
+Description: Example applications for writign messaging apps with Qpid Proton
+
+Package: libqpid-proton-dev-doc
+Architecture: all
+Description: Developer documentation for Qpid Proton
+
+Package: python-qpid-proton
+Architecture: any
+Depends: libqpid-proton, ${python:Depends}, ${shlibs:Depends}, ${misc:Depends}
+Provides: ${python:Provides}
+Description: Python language bindings for Qpid Proton messaging framework
+
+Package: python-qpid-proton-doc
+Architecture: all
+Depends: python-qpid-proton (= ${binary:Version})
+Description: Documentation for the Python language bindings for Qpid Proton

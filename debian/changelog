@@ -1,0 +1,6 @@
+qpid-proton (0.6-1) unstable; urgency=low
+
+  * Initial release. (Closes: #732302)
+  * This is my first package for Debian.
+
+ -- Darryl L. Pierce <dpierce@redhat.com>  Fri, 07 Feb 2014 15:45:18 -0500
