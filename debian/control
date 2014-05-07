@@ -1,7 +1,8 @@
 Source: qpid-proton
 Section: libs
 Priority: optional
-Maintainer: Darryl L. Pierce <dpierce@redhat.com>
+Maintainer: Debian Middleware Maintainers <pkg-middleware-maintainers@lists.alioth.debian.org>
+Uploaders: Darryl L. Pierce <dpierce@redhat.com>, Daniel Pocock <daniel@pocock.pro>
 Build-Depends: debhelper (>= 8.0.0),
                cmake,
 	       swig,
@@ -16,8 +17,8 @@ Build-Depends: debhelper (>= 8.0.0),
 	       ruby-dev
 Standards-Version: 3.9.3
 Homepage: http://qpid.apache.org/proton
-Vcs-Git: git://github.com/mcpierce/Proton.git
-Vcs-Browser: http://github.com/mcpierce/Proton
+Vcs-Browser: http://git.debian.org/?p=pkg-middleware/qpid-proton.git
+Vcs-Git: git://git.debian.org/git/pkg-middleware/qpid-proton.git
 
 Package: qpid-proton
 Architecture: any
