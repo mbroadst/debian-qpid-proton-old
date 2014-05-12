@@ -3,7 +3,7 @@ Section: libs
 Priority: optional
 Maintainer: Debian Middleware Maintainers <pkg-middleware-maintainers@lists.alioth.debian.org>
 Uploaders: Darryl L. Pierce <dpierce@redhat.com>, Daniel Pocock <daniel@pocock.pro>
-Build-Depends: debhelper (>= 8.0.0),
+Build-Depends: debhelper (>= 9.0.0~),
                cmake,
 	       swig,
 	       pkg-config,
@@ -18,41 +18,98 @@ Homepage: http://qpid.apache.org/proton
 Vcs-Browser: http://git.debian.org/?p=pkg-middleware/qpid-proton.git
 Vcs-Git: git://git.debian.org/git/pkg-middleware/qpid-proton.git
 
-Package: qpid-proton
+Package: qpid-proton-dump
 Architecture: any
-Depends: libqpid-proton (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
+Depends: libqpid-proton2 (>= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
+Pre-Depends: multiarch-support
+Multi-Arch: same
 Description: Qpid Proton messaging tools
+ Qpid Proton is a high-performance, lightweight messaging library. It can be
+ used in the widest range of messaging applications, including brokers, client
+ libraries, routers, bridges, proxies, and more. Proton makes it trivial to
+ integrate with the AMQP 1.0 ecosystem from any platform, environment, or
+ language.
+ .
+ This package provides the Qpid Proton dump tool.
 
-Package: libqpid-proton
+Package: libqpid-proton2
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Pre-Depends: multiarch-support
-Description: C libraries for Qpid Proton.
+Multi-Arch: same
+Description: C libraries for Qpid Proton
+ Qpid Proton is a high-performance, lightweight messaging library. It can be
+ used in the widest range of messaging applications, including brokers, client
+ libraries, routers, bridges, proxies, and more. Proton makes it trivial to
+ integrate with the AMQP 1.0 ecosystem from any platform, environment, or
+ language.
+ .
+ This package provides the shared libraries for Qpid Proton.
 
-Package: libqpid-proton-dev
+Package: libqpid-proton2-dev
 Architecture: any
 Section: libdevel
-Depends: libqpid-proton (= ${binary:Version}), ${misc:Depends}
+Depends: libqpid-proton2 (= ${binary:Version}), ${misc:Depends}
 Multi-Arch: same
 Description: Development libraries for writing messaging apps with Qpid Proton
+ Qpid Proton is a high-performance, lightweight messaging library. It can be
+ used in the widest range of messaging applications, including brokers, client
+ libraries, routers, bridges, proxies, and more. Proton makes it trivial to
+ integrate with the AMQP 1.0 ecosystem from any platform, environment, or
+ language.
+ .
+ This package provides the C development libraries for Qpid Proton.
 
-Package: libqpid-proton-dev-examples
+Package: libqpid-proton2-dev-examples
 Architecture: all
 Section: libdevel
-depends: libqpid-proton-dev (= ${binary:Version})
+Depends: libqpid-proton2-dev (>= ${binary:Version}), ${misc:Depends}
 Description: Example applications for writign messaging apps with Qpid Proton
+ Qpid Proton is a high-performance, lightweight messaging library. It can be
+ used in the widest range of messaging applications, including brokers, client
+ libraries, routers, bridges, proxies, and more. Proton makes it trivial to
+ integrate with the AMQP 1.0 ecosystem from any platform, environment, or
+ language.
+ .
+ This package provides C language examples for Qpid Proton.
 
-Package: libqpid-proton-dev-doc
+Package: libqpid-proton2-dev-doc
 Architecture: all
+Section: doc
+Depends: ${misc:Depends}
 Description: Developer documentation for Qpid Proton
+ Qpid Proton is a high-performance, lightweight messaging library. It can be
+ used in the widest range of messaging applications, including brokers, client
+ libraries, routers, bridges, proxies, and more. Proton makes it trivial to
+ integrate with the AMQP 1.0 ecosystem from any platform, environment, or
+ language.
+ .
+ This package provides C developer documentation for Qpid Proton.
 
 Package: python-qpid-proton
 Architecture: any
-Depends: libqpid-proton, ${python:Depends}, ${shlibs:Depends}, ${misc:Depends}
+Section: python
+Depends: libqpid-proton2, ${python:Depends}, ${shlibs:Depends}, ${misc:Depends}
 Provides: ${python:Provides}
 Description: Python language bindings for Qpid Proton messaging framework
+ Qpid Proton is a high-performance, lightweight messaging library. It can be
+ used in the widest range of messaging applications, including brokers, client
+ libraries, routers, bridges, proxies, and more. Proton makes it trivial to
+ integrate with the AMQP 1.0 ecosystem from any platform, environment, or
+ language.
+ .
+ This package provides Python language bindings for Qpid Proton.
 
 Package: python-qpid-proton-doc
 Architecture: all
-Depends: python-qpid-proton (= ${binary:Version})
+Section: doc
+Depends: ${misc:Depends}
 Description: Documentation for the Python language bindings for Qpid Proton
+ Qpid Proton is a high-performance, lightweight messaging library. It can be
+ used in the widest range of messaging applications, including brokers, client
+ libraries, routers, bridges, proxies, and more. Proton makes it trivial to
+ integrate with the AMQP 1.0 ecosystem from any platform, environment, or
+ language.
+ .
+ This package provides documentation for the Python language bindings for
+ Qpid Proton.
