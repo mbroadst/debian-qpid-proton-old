@@ -1,2 +1,2 @@
-usr/lib/libqpid-proton.so
+usr/lib/*/libqpid-proton.so
 usr/include/proton

@@ -21,8 +21,6 @@ Vcs-Git: git://git.debian.org/git/pkg-middleware/qpid-proton.git
 Package: qpid-proton-dump
 Architecture: any
 Depends: libqpid-proton2 (>= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
-Pre-Depends: multiarch-support
-Multi-Arch: same
 Description: Qpid Proton messaging tools
  Qpid Proton is a high-performance, lightweight messaging library. It can be
  used in the widest range of messaging applications, including brokers, client
@@ -35,8 +33,7 @@ Description: Qpid Proton messaging tools
 Package: libqpid-proton2
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Pre-Depends: multiarch-support
-Multi-Arch: same
+Pre-Depends: ${misc:Pre-Depends}
 Description: C libraries for Qpid Proton
  Qpid Proton is a high-performance, lightweight messaging library. It can be
  used in the widest range of messaging applications, including brokers, client
@@ -50,7 +47,6 @@ Package: libqpid-proton2-dev
 Architecture: any
 Section: libdevel
 Depends: libqpid-proton2 (= ${binary:Version}), ${misc:Depends}
-Multi-Arch: same
 Description: Development libraries for writing messaging apps with Qpid Proton
  Qpid Proton is a high-performance, lightweight messaging library. It can be
  used in the widest range of messaging applications, including brokers, client
