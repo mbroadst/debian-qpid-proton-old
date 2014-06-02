@@ -1,21 +1,5 @@
-qpid-proton (0.7-1.1) UNRELEASED; urgency=low
-
-  * Non-maintainer upload.
-  * Removed examples from libqpid-proton-dev-docs.
-  * Added an extended description to libqpid-proton.
-  * Renamed libqpid-proton to libqpid-proton2 to reflect soversion.
-  * Removed dependencies from -doc packages on binary packages.
-  * Fixed multi-arch for qpid-proton package.
-  * Fixed the descriptions for each package.
-  * Added the qpid-proton-dump package.
-  * Added a Debian watch file.
-  * Fixed license for free getopt code from Mark Kim.
-  * Fixed the sections for packages. 
-
- -- Darryl Pierce <dpierce@redhat.com>  Fri, 09 May 2014 07:59:57 -0400
-
 qpid-proton (0.7-1) unstable; urgency=low
 
   * Initial release. (Closes: #732302)
 
- -- Darryl L. Pierce <dpierce@redhat.com>  Wed, 07 May 2014 14:44:45 +0200
+ -- Daniel Pocock <daniel@pocock.pro>  Mon, 02 Jun 2014 22:05:01 +0200
