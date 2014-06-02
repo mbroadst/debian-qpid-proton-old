@@ -1,1 +1,2 @@
+# this will be supplied in a future release
 qpid-proton-dump: binary-without-manpage usr/bin/proton-dump
