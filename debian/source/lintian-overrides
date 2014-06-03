@@ -1,0 +1,2 @@
+# Python lib package prepared using non-standard CMake build system, but deps appear to be detected OK
+qpid-proton source: python-depends-but-no-python-helper python-qpid-proton
