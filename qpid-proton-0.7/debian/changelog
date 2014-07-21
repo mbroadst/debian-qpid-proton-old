@@ -1,3 +1,9 @@
+qpid-proton (0.7-2) trusty; urgency=medium
+
+  * Fixed the licensing to be GPLv3 for all Debian packaging files.
+
+ -- Darryl Pierce <mcpierce@gmail.com>  Mon, 21 Jul 2014 08:36:31 -0400
+
 qpid-proton (0.7-1.2) trusty; urgency=low
 
   * Fixed various lintian error messages.
