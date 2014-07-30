@@ -1,0 +1,2 @@
+version=3
+http://www.apache.org/dist/qpid/proton/([\d])+\.(]\d])+/qpid-proton-(.*)\.tar\.gz
