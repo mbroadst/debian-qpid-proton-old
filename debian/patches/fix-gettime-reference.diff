@@ -1,0 +1,24 @@
+Description: fix-gettime-reference
+ Added rt to the end of the link line to help find gettime method.
+ .
+ qpid-proton (0.7-3precise) precise; urgency=medium
+ .
+   *  Renamed libqpid-proton2-dev package to libqpid-proton-dev.
+Author: Darryl Pierce <mcpierce@gmail.com>
+
+---
+--- qpid-proton-0.7.orig/proton-c/CMakeLists.txt
++++ qpid-proton-0.7/proton-c/CMakeLists.txt
+@@ -304,7 +304,7 @@ add_library (
+   ${qpid-proton-platform}
+   )
+ 
+-target_link_libraries (qpid-proton ${UUID_LIB} ${SSL_LIB} ${TIME_LIB} ${PLATFORM_LIBS})
++target_link_libraries (qpid-proton ${UUID_LIB} ${SSL_LIB} ${TIME_LIB} ${PLATFORM_LIBS} rt)
+ 
+ set_target_properties (
+   qpid-proton
+--- /dev/null
++++ qpid-proton-0.7/patches/series
+@@ -0,0 +1 @@
++fix-gettime-reference.diff
