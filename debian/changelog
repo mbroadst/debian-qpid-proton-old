@@ -1,0 +1,46 @@
+qpid-proton (0.7-4~wheezy) wheezy; urgency=medium
+
+  * Bumped the release number.
+
+ -- Darryl L. Pierce <mcpierce@gmail.com>  Wed, 30 Jul 2014 16:37:43 -0400
+
+qpid-proton (0.7-3~wheezy) wheezy; urgency=medium
+
+  * Renamed libqpid-proton2-dev package to libqpid-proton-dev.
+  * Manually linking rt and uuid to libqpid-proton since CMake does not find them.
+
+ -- Darryl L. Pierce <mcpierce@gmail.com>  Wed, 30 Jul 2014 10:24:55 -0400
+
+qpid-proton (0.7-2) unstable; urgency=medium
+
+  * Fixed the licensing to be GPLv3 for all Debian packaging files.
+
+ -- Darryl Pierce <mcpierce@gmail.com>  Mon, 21 Jul 2014 08:36:31 -0400
+
+qpid-proton (0.7-1.2) unstable; urgency=low
+
+  * Fixed various lintian error messages.
+
+ -- Darryl Pierce <mcpierce@gmail.com>  Mon, 14 Jul 2014 10:02:46 -0400
+
+qpid-proton (0.7-1.1) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * Removed examples from libqpid-proton-dev-docs.
+  * Added an extended description to libqpid-proton.
+  * Renamed libqpid-proton to libqpid-proton2 to reflect soversion.
+  * Removed dependencies from -doc packages on binary packages.
+  * Fixed multi-arch for qpid-proton package.
+  * Fixed the descriptions for each package.
+  * Added the qpid-proton-dump package.
+  * Added a Debian watch file.
+  * Fixed license for free getopt code from Mark Kim.
+  * Fixed the sections for packages. 
+
+ -- Darryl Pierce <mcpierce@gmail.com>  Fri, 09 May 2014 07:59:57 -0400
+
+qpid-proton (0.7-1) unstable; urgency=low
+
+  * Initial release. (Closes: #732302)
+
+ -- Darryl L. Pierce <mcpierce@gmail.com>  Wed, 07 May 2014 14:44:45 +0200
