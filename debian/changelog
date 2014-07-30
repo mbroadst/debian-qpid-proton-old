@@ -1,42 +1,42 @@
-qpid-proton (0.7-6) unstable; urgency=low
+qpid-proton (0.7-6mcpierce1) trusty; urgency=low
 
   * Added package control statements to handle any name conflicts for -dev.
 
  -- Darryl L. Pierce <mcpierce@gmail.com>  Thu, 04 Sep 2014 18:36:35 -0400
 
-qpid-proton (0.7-5) unstable; urgency=low
+qpid-proton (0.7-5~trusty) trusty; urgency=low
 
   * Added CMake files to libqpid-proton-dev.
   * Added pkg-config files to libqpid-proton-dev.
 
  -- Darryl L. Pierce <mcpierce@gmail.com>  Thu, 04 Sep 2014 11:07:38 -0400
 
-qpid-proton (0.7-4) unstable; urgency=medium
+qpid-proton (0.7-4~trusty) trusty; urgency=medium
 
   * Bumped the release number.
 
  -- Darryl L. Pierce <mcpierce@gmail.com>  Wed, 30 Jul 2014 16:37:43 -0400
 
-qpid-proton (0.7-3) unstable; urgency=medium
+qpid-proton (0.7-3~trusty) trusty; urgency=medium
 
   * Renamed libqpid-proton2-dev package to libqpid-proton-dev.
   * Manually linking rt and uuid to libqpid-proton since CMake does not find them.
 
  -- Darryl L. Pierce <mcpierce@gmail.com>  Wed, 30 Jul 2014 10:24:55 -0400
 
-qpid-proton (0.7-2) unstable; urgency=medium
+qpid-proton (0.7-2~trusty) trusty; urgency=medium
 
   * Fixed the licensing to be GPLv3 for all Debian packaging files.
 
  -- Darryl Pierce <mcpierce@gmail.com>  Mon, 21 Jul 2014 08:36:31 -0400
 
-qpid-proton (0.7-1.2) unstable; urgency=low
+qpid-proton (0.7-1.2~trusty) trusty; urgency=low
 
   * Fixed various lintian error messages.
 
  -- Darryl Pierce <mcpierce@gmail.com>  Mon, 14 Jul 2014 10:02:46 -0400
 
-qpid-proton (0.7-1.1) unstable; urgency=low
+qpid-proton (0.7-1.1~trusty) trusty; urgency=low
 
   * Non-maintainer upload.
   * Removed examples from libqpid-proton-dev-docs.
@@ -52,7 +52,7 @@ qpid-proton (0.7-1.1) unstable; urgency=low
 
  -- Darryl Pierce <mcpierce@gmail.com>  Fri, 09 May 2014 07:59:57 -0400
 
-qpid-proton (0.7-1) unstable; urgency=low
+qpid-proton (0.7-1~trusty) trusty; urgency=low
 
   * Initial release. (Closes: #732302)
 
