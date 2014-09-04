@@ -45,6 +45,9 @@ Description: C libraries for Qpid Proton
  This package provides the shared libraries for Qpid Proton.
 
 Package: libqpid-proton2-dev
+Provides: libqpid-proton-dev
+Replaces: libqpid-proton-dev
+Conflicts: libqpid-proton-dev
 Architecture: any
 Section: libdevel
 Depends: libqpid-proton2 (= ${binary:Version}), ${misc:Depends}
@@ -59,6 +62,9 @@ Description: Development libraries for writing messaging apps with Qpid Proton
  This package provides the C development libraries for Qpid Proton.
 
 Package: libqpid-proton2-dev-examples
+Provides: libqpid-proton-dev-examples
+Replaces: libqpid-proton-dev-examples
+Conflicts: libqpid-proton-dev-examples
 Architecture: all
 Section: libdevel
 Depends: libqpid-proton2-dev (>= ${binary:Version}), ${misc:Depends}
@@ -72,6 +78,9 @@ Description: Example applications for writign messaging apps with Qpid Proton
  This package provides C language examples for Qpid Proton.
 
 Package: libqpid-proton2-dev-doc
+Provides: libqpid-proton-dev-doc
+Replaces: libqpid-proton-dev-doc
+Conflicts: libqpid-proton-dev-doc
 Architecture: all
 Section: doc
 Depends: ${misc:Depends}
