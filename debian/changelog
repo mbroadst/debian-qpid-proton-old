@@ -1,3 +1,10 @@
+qpid-proton (0.7-5) unstable; urgency=low
+
+  * Added CMake files to libqpid-proton-dev.
+  * Added pkg-config files to libqpid-proton-dev.
+
+ -- Darryl L. Pierce <mcpierce@gmail.com>  Thu, 04 Sep 2014 11:07:38 -0400
+
 qpid-proton (0.7-4) unstable; urgency=medium
 
   * Bumped the release number.
