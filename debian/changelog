@@ -1,3 +1,9 @@
+qpid-proton (0.7-6) unstable; urgency=low
+
+  * Added package control statements to handle any name conflicts for -dev.
+
+ -- Darryl L. Pierce <mcpierce@gmail.com>  Thu, 04 Sep 2014 18:36:35 -0400
+
 qpid-proton (0.7-5trusty+mcpierce1) trusty; urgency=low
 
   * Added CMake files to libqpid-proton-dev.
