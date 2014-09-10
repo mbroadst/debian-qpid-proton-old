@@ -1,4 +1,4 @@
-qpid-proton (0.7-6) unstable; urgency=low
+qpid-proton (0.7-6trusty+mcpierce1) trusty; urgency=low
 
   * Added package control statements to handle any name conflicts for -dev.
 
