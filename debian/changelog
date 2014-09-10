@@ -1,4 +1,4 @@
-qpid-proton (0.7-5) unstable; urgency=low
+qpid-proton (0.7-5trusty+mcpierce1) trusty; urgency=low
 
   * Added CMake files to libqpid-proton-dev.
   * Added pkg-config files to libqpid-proton-dev.
