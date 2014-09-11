@@ -1,1 +1,2 @@
 libqpid-proton2-dev-doc: embedded-javascript-library usr/share/proton-0.7/docs/api-c/jquery.js
+libqpid-proton2-dev-doc: script-not-executable usr/share/proton-0.7/docs/api-c/installdox

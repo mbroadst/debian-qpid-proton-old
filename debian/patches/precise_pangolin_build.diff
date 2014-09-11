@@ -1,0 +1,11 @@
+--- a/proton-c/CMakeLists.txt
++++ b/proton-c/CMakeLists.txt
+@@ -304,7 +304,7 @@ add_library (
+   ${qpid-proton-platform}
+   )
+ 
+-target_link_libraries (qpid-proton ${UUID_LIB} ${SSL_LIB} ${TIME_LIB} ${PLATFORM_LIBS})
++target_link_libraries (qpid-proton uuid ${SSL_LIB} rt ${PLATFORM_LIBS})
+ 
+ set_target_properties (
+   qpid-proton

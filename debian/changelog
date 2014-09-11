@@ -1,6 +1,7 @@
-qpid-proton (0.7-6) unstable; urgency=low
+qpid-proton (0.7-6precise+mcpierce1) precise; urgency=low
 
   * Added package control statements to handle any name conflicts for -dev.
+  * Fixed linking against libuuid and librt.
 
  -- Darryl L. Pierce <mcpierce@gmail.com>  Thu, 04 Sep 2014 18:36:35 -0400
 
