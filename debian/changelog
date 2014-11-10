@@ -1,3 +1,10 @@
+qpid-proton (0.7-7) unstable; urgency=low
+
+  * Fix FTBFS for on Jessie. 
+  * Removed dependency on libsslcommon2, replaced it with libssl-dev.
+
+ -- Darryl L. Pierce <mcpierce@gmail.com>  Mon, 10 Nov 2014 16:28:20 -0500
+
 qpid-proton (0.7-6) unstable; urgency=low
 
   * Added package control statements to handle any name conflicts for -dev.
