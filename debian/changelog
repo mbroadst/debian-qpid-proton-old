@@ -1,4 +1,4 @@
-qpid-proton (0.7-8) unstable; urgency=low
+qpid-proton (0.7-8trusty+mcpierce1) trusty; urgency=low
 
   * Bumped the release to include the FTBFS bug id. (Closes: #768617)
 
