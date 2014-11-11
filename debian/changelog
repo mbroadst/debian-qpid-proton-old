@@ -1,3 +1,9 @@
+qpid-proton (0.7-8) unstable; urgency=low
+
+  * Bumped the release to include the FTBFS bug id. (Closes: #768617)
+
+ -- Darryl L. Pierce <mcpierce@gmail.com>  Tue, 11 Nov 2014 08:07:12 -0500
+
 qpid-proton (0.7-7trusty+mcpierce1) trusty; urgency=low
 
   * Fix FTBFS for on Jessie. 
