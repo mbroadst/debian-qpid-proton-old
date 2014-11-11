@@ -1,4 +1,4 @@
-qpid-proton (0.7-7) unstable; urgency=low
+qpid-proton (0.7-7precise+mcpierce1) precise; urgency=low
 
   * Fix FTBFS for on Jessie. 
   * Removed dependency on libsslcommon2, replaced it with libssl-dev.
