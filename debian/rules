@@ -20,18 +20,30 @@
 # This has to be exported to make some magic below work.
 export DH_OPTIONS
 export DH_ALWAYS_EXCLUDE=LICENSE
+<<<<<<< HEAD
+=======
+DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+>>>>>>> 3314de4... qpid_proton-0.7-4
 
 %:
 	dh $@
 
 override_dh_auto_configure:
+<<<<<<< HEAD
 	dh_auto_configure -- -DPROTON_DISABLE_RPATH=true -DNOBUILD_RUBY=on -DSYSINSTALL_BINDINGS=on
+=======
+	dh_auto_configure -- -DPROTON_DISABLE_RPATH=true \
+                             -DNOBUILD_RUBY=on \
+                             -DSYSINSTALL_BINDINGS=on \
+                             -DLIB_INSTALL_DIR=/usr/lib/${DEB_HOST_MULTIARCH}
+>>>>>>> 3314de4... qpid_proton-0.7-4
 
 override_dh_auto_build:
 	dh_auto_build -- all docs
 
 override_dh_auto_test:
 	# TODO enable them when they work again
+<<<<<<< HEAD
 
 # Hack for multiarch
 # CMake doesn't really support libdir so we just manually
@@ -41,3 +53,5 @@ override_dh_auto_install:
 	mkdir -p debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)
 	mv debian/tmp/usr/lib/lib*.so* debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)
 
+=======
+>>>>>>> 3314de4... qpid_proton-0.7-4

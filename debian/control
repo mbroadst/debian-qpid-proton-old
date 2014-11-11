@@ -2,7 +2,11 @@ Source: qpid-proton
 Section: libs
 Priority: optional
 Maintainer: Debian Middleware Maintainers <pkg-middleware-maintainers@lists.alioth.debian.org>
+<<<<<<< HEAD
 Uploaders: Darryl L. Pierce <dpierce@redhat.com>, Daniel Pocock <daniel@pocock.pro>
+=======
+Uploaders: Darryl L. Pierce <mcpierce@gmail.com>, Daniel Pocock <daniel@pocock.pro>
+>>>>>>> 3314de4... qpid_proton-0.7-4
 Build-Depends: debhelper (>= 9.0.0~),
                cmake,
 	       swig,
@@ -13,7 +17,11 @@ Build-Depends: debhelper (>= 9.0.0~),
 	       python-epydoc,
 	       python (>=2.6.6-3~),
 	       python-dev (>=2.6.6-3~)
+<<<<<<< HEAD
 Standards-Version: 3.9.5
+=======
+Standards-Version: 3.9.4
+>>>>>>> 3314de4... qpid_proton-0.7-4
 Homepage: http://qpid.apache.org/proton
 Vcs-Browser: http://git.debian.org/?p=pkg-middleware/qpid-proton.git
 Vcs-Git: git://git.debian.org/git/pkg-middleware/qpid-proton.git
@@ -33,7 +41,12 @@ Description: Qpid Proton messaging tools
 Package: libqpid-proton2
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
+<<<<<<< HEAD
 Pre-Depends: ${misc:Pre-Depends}
+=======
+Pre-Depends: multiarch-support
+Multi-Arch: same
+>>>>>>> 3314de4... qpid_proton-0.7-4
 Description: C libraries for Qpid Proton
  Qpid Proton is a high-performance, lightweight messaging library. It can be
  used in the widest range of messaging applications, including brokers, client
@@ -47,6 +60,10 @@ Package: libqpid-proton2-dev
 Architecture: any
 Section: libdevel
 Depends: libqpid-proton2 (= ${binary:Version}), ${misc:Depends}
+<<<<<<< HEAD
+=======
+Multi-Arch: same
+>>>>>>> 3314de4... qpid_proton-0.7-4
 Description: Development libraries for writing messaging apps with Qpid Proton
  Qpid Proton is a high-performance, lightweight messaging library. It can be
  used in the widest range of messaging applications, including brokers, client
@@ -85,7 +102,14 @@ Description: Developer documentation for Qpid Proton
 Package: python-qpid-proton
 Architecture: any
 Section: python
+<<<<<<< HEAD
 Depends: libqpid-proton2, ${python:Depends}, ${shlibs:Depends}, ${misc:Depends}
+=======
+Depends: libqpid-proton2,
+         ${python:Depends5H},
+         python (>= 2.6),
+         ${shlibs:Depends}, ${misc:Depends}
+>>>>>>> 3314de4... qpid_proton-0.7-4
 Provides: ${python:Provides}
 Description: Python language bindings for Qpid Proton messaging framework
  Qpid Proton is a high-performance, lightweight messaging library. It can be

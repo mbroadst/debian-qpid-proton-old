@@ -1,2 +1,6 @@
+<<<<<<< HEAD
 # this will be supplied in a future release
 qpid-proton-dump: binary-without-manpage usr/bin/proton-dump
+=======
+qpid-proton-dump: binary-without-manpage usr/bin/proton-dump
+>>>>>>> 3314de4... qpid_proton-0.7-4

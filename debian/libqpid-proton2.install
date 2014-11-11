@@ -1,1 +1,6 @@
+<<<<<<< HEAD
 usr/lib/*/libqpid-proton.so.*
+=======
+usr/lib/*/libqpid-proton.so.2
+usr/lib/*/libqpid-proton.so.2.0.0
+>>>>>>> 3314de4... qpid_proton-0.7-4
