@@ -20,7 +20,6 @@
  */
 
 #include <stdarg.h>
-#include <proton/type_compat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,8 +28,9 @@
 #undef NDEBUG
 #include <assert.h>
 
-#include <proton/error.h>
-#include <proton/util.h>
+#include "proton/type_compat.h"
+#include "proton/error.h"
+#include "util.h"
 
 static inline bool equalStrP(const char* s1, const char* s2)
 {
@@ -64,6 +64,8 @@ static bool test_url_parse(const char* url0, const char* scheme0, const char* us
 
 int main(int argc, char **argv)
 {
+  assert(test_url_parse("", 0, 0, 0, "", 0, 0));
+  assert(test_url_parse("/Foo.bar:90087@somewhere", 0, 0, 0, "", 0, "Foo.bar:90087@somewhere"));
   assert(test_url_parse("host", 0, 0, 0, "host", 0, 0));
   assert(test_url_parse("host:423", 0, 0, 0, "host", "423", 0));
   assert(test_url_parse("user@host", 0, "user", 0, "host", 0, 0));
@@ -96,5 +98,10 @@ int main(int argc, char **argv)
   assert(test_url_parse("us%2fer:password@host", 0, "us/er", "password", "host", 0, 0));
   assert(test_url_parse("us%2Fer:password@host", 0, "us/er", "password", "host", 0, 0));
   assert(test_url_parse("user:pass%2fword%@host", 0, "user", "pass/word%", "host", 0, 0));
+  assert(test_url_parse("localhost/temp-queue://ID:ganymede-36663-1408448359876-2:123:0", 0, 0, 0, "localhost", 0, "temp-queue://ID:ganymede-36663-1408448359876-2:123:0"));
+  assert(test_url_parse("/temp-queue://ID:ganymede-36663-1408448359876-2:123:0", 0, 0, 0, "", 0, "temp-queue://ID:ganymede-36663-1408448359876-2:123:0"));
+  assert(test_url_parse("amqp://localhost/temp-queue://ID:ganymede-36663-1408448359876-2:123:0", "amqp", 0, 0, "localhost", 0, "temp-queue://ID:ganymede-36663-1408448359876-2:123:0"));
+  // Really perverse url
+  assert(test_url_parse("://:@://:", "", "", "", "", "", "/:"));
   return 0;
 }

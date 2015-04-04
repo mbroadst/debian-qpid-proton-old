@@ -53,15 +53,17 @@ PN_EXTERN pn_session_t *pn_session(pn_connection_t *connection);
 /**
  * Free a session object.
  *
- * When a session object is freed, all ::pn_link_t, and
- * ::pn_delivery_t objects associated with the session are also
- * freed.
+ * When a session is freed it will no longer be retained by the
+ * connection once any internal references to the session are no
+ * longer needed. Freeing a session will free all links on that
+ * session and settle any deliveries on those links.
  *
  * @param[in] session a session object to free (or NULL)
  */
 PN_EXTERN void pn_session_free(pn_session_t *session);
 
 /**
+ * @deprecated
  * Get the application context that is associated with a session
  * object.
  *
@@ -74,6 +76,7 @@ PN_EXTERN void pn_session_free(pn_session_t *session);
 PN_EXTERN void *pn_session_get_context(pn_session_t *session);
 
 /**
+ * @deprecated
  * Set a new application context for a session object.
  *
  * The application context for a session object may be retrieved
@@ -83,6 +86,14 @@ PN_EXTERN void *pn_session_get_context(pn_session_t *session);
  * @param[in] context the application context
  */
 PN_EXTERN void pn_session_set_context(pn_session_t *session, void *context);
+
+/**
+ * Get the attachments that are associated with a session object.
+ *
+ * @param[in] session the session whose attachments are to be returned.
+ * @return the attachments for the session object
+ */
+PN_EXTERN pn_record_t *pn_session_attachments(pn_session_t *session);
 
 /**
  * Get the endpoint state flags for a session.

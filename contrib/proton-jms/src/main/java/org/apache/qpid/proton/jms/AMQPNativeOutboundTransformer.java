@@ -28,13 +28,10 @@ import javax.jms.MessageFormatException;
 import java.nio.ByteBuffer;
 
 import org.apache.qpid.proton.message.ProtonJMessage;
-import org.apache.qpid.proton.message.impl.MessageFactoryImpl;
 /**
 * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
 */
 public class AMQPNativeOutboundTransformer extends OutboundTransformer {
-
-    private static final MessageFactoryImpl MESSAGE_FACTORY = new MessageFactoryImpl();
 
     public AMQPNativeOutboundTransformer(JMSVendor vendor) {
         super(vendor);
@@ -73,7 +70,7 @@ public class AMQPNativeOutboundTransformer extends OutboundTransformer {
             if( count > 1 ) {
 
                 // decode...
-                ProtonJMessage amqp = MESSAGE_FACTORY.createMessage();
+                ProtonJMessage amqp = (ProtonJMessage) org.apache.qpid.proton.message.Message.Factory.create();
                 int offset = 0;
                 int len = data.length;
                 while( len > 0 ) {
@@ -84,7 +81,9 @@ public class AMQPNativeOutboundTransformer extends OutboundTransformer {
                 }
 
                 // Update the DeliveryCount header...
-                amqp.getHeader().setDeliveryCount(new UnsignedInteger(count));
+                // The AMQP delivery-count field only includes prior failed delivery attempts,
+                // whereas JMSXDeliveryCount includes the first/current delivery attempt. Subtract 1.
+                amqp.getHeader().setDeliveryCount(new UnsignedInteger(count - 1));
 
                 // Re-encode...
                 ByteBuffer buffer = ByteBuffer.wrap(new byte[1024*4]);

@@ -30,7 +30,7 @@
        requiring the latest trunk build can use an unchanging value in their pom.xml.
        We will use a more representative version if and when snapshots from multiple
        branches are being concurrently produced. -->
-  <version>0.7</version>
+  <version>0.9</version>
   <packaging>pom</packaging>
 
   <properties>
@@ -98,7 +98,7 @@
     <module>contrib/proton-jms</module>
     <module>contrib/proton-hawtdispatch</module>
     <module>tests</module>
-    <module>examples/messenger/java</module>
+    <module>examples/java/messenger</module>
   </modules>
 
   <url>http://qpid.apache.org/proton</url>
@@ -111,4 +111,27 @@
   <ciManagement>
     <url>https://builds.apache.org/view/M-R/view/Qpid/job/Qpid-proton-j/</url>
   </ciManagement>
+
+  <profiles>
+    <profile>
+      <id>sources</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <version>2.2.1</version>
+            <executions>
+              <execution>
+                <id>attach-sources</id>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

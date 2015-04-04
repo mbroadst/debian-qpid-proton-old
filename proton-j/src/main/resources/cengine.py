@@ -25,7 +25,7 @@ from org.apache.qpid.proton.amqp.transaction import Coordinator
 from org.apache.qpid.proton.amqp.transport import ErrorCondition, \
   SenderSettleMode, ReceiverSettleMode
 from org.apache.qpid.proton.engine import EndpointState, Sender, \
-  Receiver, TransportException
+  Receiver, Transport as _Transport, TransportException
 
 from java.util import EnumSet
 from jarray import array, zeros
@@ -57,10 +57,10 @@ PN_NONDURABLE = 0
 PN_CONFIGURATION = 1
 PN_DELIVERIES = 2
 
-PN_LINK_CLOSE = 0
-PN_SESSION_CLOSE = 1
-PN_CONNECTION_CLOSE = 2
-PN_NEVER = 3
+PN_EXPIRE_WITH_LINK = 0
+PN_EXPIRE_WITH_SESSION = 1
+PN_EXPIRE_WITH_CONNECTION = 2
+PN_EXPIRE_NEVER = 3
 
 PN_DIST_MODE_UNSPECIFIED = 0
 PN_DIST_MODE_COPY = 1
@@ -72,10 +72,10 @@ PN_REJECTED = (0x0000000000000025)
 PN_RELEASED = (0x0000000000000026)
 PN_MODIFIED = (0x0000000000000027)
 
-PN_TRACE_OFF = (0)
-PN_TRACE_RAW = (1)
-PN_TRACE_FRM = (2)
-PN_TRACE_DRV = (4)
+PN_TRACE_OFF = _Transport.TRACE_OFF
+PN_TRACE_RAW = _Transport.TRACE_RAW
+PN_TRACE_FRM = _Transport.TRACE_FRM
+PN_TRACE_DRV = _Transport.TRACE_DRV
 
 def wrap(obj, wrapper):
   if obj:
@@ -98,7 +98,11 @@ class pn_condition:
       self.description = None
       self.info.clear()
     else:
-      self.name = impl.getCondition().toString()
+      cond = impl.getCondition()
+      if cond is None:
+        self.name = None
+      else:
+        self.name = cond.toString()
       self.description = impl.getDescription()
       obj2dat(impl.getInfo(), self.info)
 
@@ -139,7 +143,7 @@ class endpoint_wrapper:
 
   def __init__(self, impl):
     self.impl = impl
-    self.context = None
+    self.attachments = {}
     self.condition = pn_condition()
     self.remote_condition = pn_condition()
 
@@ -210,17 +214,20 @@ def pn_connection_desired_capabilities(conn):
 def pn_connection_remote_desired_capabilities(conn):
   return array2dat(conn.impl.getRemoteDesiredCapabilities(), PN_SYMBOL)
 
-def pn_connection_get_context(conn):
-  return conn.context
-
-def pn_connection_set_context(conn, ctx):
-  conn.context = ctx
+def pn_connection_attachments(conn):
+  return conn.attachments
 
 def pn_connection_set_container(conn, name):
   conn.impl.setContainer(name)
 
+def pn_connection_get_container(conn):
+  return conn.impl.getContainer()
+
 def pn_connection_remote_container(conn):
   return conn.impl.getRemoteContainer()
+
+def pn_connection_get_hostname(conn):
+  return conn.impl.getHostname()
 
 def pn_connection_set_hostname(conn, name):
   conn.impl.setHostname(name)
@@ -244,17 +251,20 @@ def pn_connection_close(conn):
   conn.on_close()
   conn.impl.close()
 
+def pn_connection_release(conn):
+  conn.impl.free()
+
+def pn_connection_transport(conn):
+  return wrap(conn.impl.getTransport(), pn_transport_wrapper)
+
 class pn_session_wrapper(endpoint_wrapper):
   pass
 
 def pn_session(conn):
   return wrap(conn.impl.session(), pn_session_wrapper)
 
-def pn_session_get_context(ssn):
-  return ssn.context
-
-def pn_session_set_context(ssn, ctx):
-  ssn.context = ctx
+def pn_session_attachments(ssn):
+  return ssn.attachments
 
 def pn_session_state(ssn):
   return endpoint_state(ssn.impl)
@@ -325,7 +335,7 @@ def pn_receiver(ssn, name):
   return wrap(ssn.impl.receiver(name), pn_link_wrapper)
 
 def pn_session_free(ssn):
-  ssn.impl = None
+  ssn.impl.free()
 
 TERMINUS_TYPES_J2P = {
   Source: PN_SOURCE,
@@ -354,17 +364,17 @@ DURABILITY_J2P = {
 }
 
 EXPIRY_POLICY_P2J = {
-  PN_LINK_CLOSE: TerminusExpiryPolicy.LINK_DETACH,
-  PN_SESSION_CLOSE: TerminusExpiryPolicy.SESSION_END,
-  PN_CONNECTION_CLOSE: TerminusExpiryPolicy.CONNECTION_CLOSE,
-  PN_NEVER: TerminusExpiryPolicy.NEVER
+  PN_EXPIRE_WITH_LINK: TerminusExpiryPolicy.LINK_DETACH,
+  PN_EXPIRE_WITH_SESSION: TerminusExpiryPolicy.SESSION_END,
+  PN_EXPIRE_WITH_CONNECTION: TerminusExpiryPolicy.CONNECTION_CLOSE,
+  PN_EXPIRE_NEVER: TerminusExpiryPolicy.NEVER
 }
 
 EXPIRY_POLICY_J2P = {
-  TerminusExpiryPolicy.LINK_DETACH: PN_LINK_CLOSE,
-  TerminusExpiryPolicy.SESSION_END: PN_SESSION_CLOSE,
-  TerminusExpiryPolicy.CONNECTION_CLOSE: PN_CONNECTION_CLOSE,
-  TerminusExpiryPolicy.NEVER: PN_NEVER
+  TerminusExpiryPolicy.LINK_DETACH: PN_EXPIRE_WITH_LINK,
+  TerminusExpiryPolicy.SESSION_END: PN_EXPIRE_WITH_SESSION,
+  TerminusExpiryPolicy.CONNECTION_CLOSE: PN_EXPIRE_WITH_CONNECTION,
+  TerminusExpiryPolicy.NEVER: PN_EXPIRE_NEVER
 }
 
 DISTRIBUTION_MODE_P2J = {
@@ -385,7 +395,7 @@ class pn_terminus:
     self.type = type
     self.address = None
     self.durability = PN_NONDURABLE
-    self.expiry_policy = PN_SESSION_CLOSE
+    self.expiry_policy = PN_EXPIRE_WITH_SESSION
     self.distribution_mode = PN_DIST_MODE_UNSPECIFIED
     self.timeout = 0
     self.dynamic = False
@@ -409,21 +419,22 @@ class pn_terminus:
   def decode(self, impl):
     if impl is not None:
       self.type = TERMINUS_TYPES_J2P[impl.__class__]
-      self.address = impl.getAddress()
-      self.durability = DURABILITY_J2P[impl.getDurable()]
-      self.expiry_policy = EXPIRY_POLICY_J2P[impl.getExpiryPolicy()]
-      self.timeout = impl.getTimeout().longValue()
-      self.dynamic = impl.getDynamic()
-      obj2dat(impl.getDynamicNodeProperties(), self.properties)
-      array2dat(impl.getCapabilities(), PN_SYMBOL, self.capabilities)
-      if self.type == PN_SOURCE:
-        self.distribution_mode = DISTRIBUTION_MODE_J2P[impl.getDistributionMode()]
-        array2dat(impl.getOutcomes(), PN_SYMBOL, self.outcomes)
-        obj2dat(impl.getFilter(), self.filter)
+      if self.type in (PN_SOURCE, PN_TARGET):
+        self.address = impl.getAddress()
+        self.durability = DURABILITY_J2P[impl.getDurable()]
+        self.expiry_policy = EXPIRY_POLICY_J2P[impl.getExpiryPolicy()]
+        self.timeout = impl.getTimeout().longValue()
+        self.dynamic = impl.getDynamic()
+        obj2dat(impl.getDynamicNodeProperties(), self.properties)
+        array2dat(impl.getCapabilities(), PN_SYMBOL, self.capabilities)
+        if self.type == PN_SOURCE:
+          self.distribution_mode = DISTRIBUTION_MODE_J2P[impl.getDistributionMode()]
+          array2dat(impl.getOutcomes(), PN_SYMBOL, self.outcomes)
+          obj2dat(impl.getFilter(), self.filter)
 
   def encode(self):
     impl = TERMINUS_TYPES_P2J[self.type]()
-    if impl is not None:
+    if self.type in (PN_SOURCE, PN_TARGET):
       impl.setAddress(self.address)
       impl.setDurable(DURABILITY_P2J[self.durability])
       impl.setExpiryPolicy(EXPIRY_POLICY_P2J[self.expiry_policy])
@@ -512,11 +523,8 @@ class pn_link_wrapper(endpoint_wrapper):
     self.impl.setSource(self.source.encode())
     self.impl.setTarget(self.target.encode())
 
-def pn_link_get_context(link):
-  return link.context
-
-def pn_link_set_context(link, ctx):
-  link.context = ctx
+def pn_link_attachments(link):
+  return link.attachments
 
 def pn_link_source(link):
   link.source.decode(link.impl.getSource())
@@ -587,6 +595,9 @@ def pn_link_remote_rcv_settle_mode(link):
 def pn_link_is_sender(link):
   return isinstance(link.impl, Sender)
 
+def pn_link_is_receiver(link):
+  return isinstance(link.impl, Receiver)
+
 def pn_link_head(conn, mask):
   local, remote = mask2set(mask)
   return wrap(conn.impl.linkHead(local, remote), pn_link_wrapper)
@@ -611,6 +622,10 @@ def pn_link_open(link):
 def pn_link_close(link):
   link.on_close()
   link.impl.close()
+
+def pn_link_detach(link):
+  link.on_close()
+  link.impl.detach()
 
 def pn_link_flow(link, n):
   link.impl.flow(n)
@@ -652,7 +667,7 @@ def pn_link_current(link):
   return wrap(link.impl.current(), pn_delivery_wrapper)
 
 def pn_link_free(link):
-  link.impl = None
+  link.impl.free()
 
 def pn_work_head(conn):
   return wrap(conn.impl.getWorkHead(), pn_delivery_wrapper)
@@ -786,7 +801,7 @@ class pn_delivery_wrapper:
 
   def __init__(self, impl):
     self.impl = impl
-    self.context = None
+    self.attachments = {}
     self.local = pn_disposition()
     self.remote = pn_disposition()
 
@@ -796,11 +811,11 @@ def pn_delivery(link, tag):
 def pn_delivery_tag(dlv):
   return dlv.impl.getTag().tostring()
 
-def pn_delivery_get_context(dlv):
-  return dlv.context
+def pn_delivery_attachments(dlv):
+  return dlv.attachments
 
-def pn_delivery_set_context(dlv, ctx):
-  dlv.context = ctx
+def pn_delivery_partial(dlv):
+  return dlv.impl.isPartial()
 
 def pn_delivery_pending(dlv):
   return dlv.impl.pending()
@@ -844,13 +859,20 @@ def pn_delivery_settle(dlv):
   dlv.impl.settle()
 
 class pn_transport_wrapper:
-
   def __init__(self, impl):
     self.impl = impl
-    self.error = pn_error(0, None)
+    self.attachments = {}
+    self.server = False
+    self.condition = pn_condition()
 
 def pn_transport():
   return wrap(Proton.transport(), pn_transport_wrapper)
+
+def pn_transport_attachments(trans):
+  return trans.attachments
+
+def pn_transport_set_server(trans):
+  trans.server = True;
 
 def pn_transport_get_max_frame(trans):
   return trans.impl.getMaxFrameSize()
@@ -862,6 +884,15 @@ def pn_transport_get_remote_max_frame(trans):
   return trans.impl.getRemoteMaxFrameSize()
 
 def pn_transport_set_idle_timeout(trans, value):
+  trans.impl.setIdleTimeout(value);
+
+def pn_transport_get_idle_timeout(trans):
+  return trans.impl.getIdleTimeout()
+
+def pn_transport_get_remote_idle_timeout(trans):
+  return trans.impl.getRemoteIdleTimeout()
+
+def pn_transport_get_frames_input(trans):
   raise Skipped()
 
 def pn_transport_set_channel_max(trans, n):
@@ -873,19 +904,22 @@ def pn_transport_get_channel_max(trans):
 def pn_transport_remote_channel_max(trans):
   return trans.impl.getRemoteChannelMax()
 
+def pn_transport_tick(trans, now):
+  return trans.impl.tick(now);
+
 def pn_transport_bind(trans, conn):
   trans.impl.bind(conn.impl)
   return 0
 
+def pn_transport_unbind(trans):
+  trans.impl.unbind()
+  return 0
+
 def pn_transport_trace(trans, n):
-  # XXX
-  pass
+  trans.impl.trace(n)
 
 def pn_transport_pending(trans):
-  try:
-    return trans.impl.pending()
-  except TransportException, e:
-    return trans.error.set(PN_ERR, str(e))
+  return trans.impl.pending()
 
 def pn_transport_peek(trans, size):
   size = min(trans.impl.pending(), size)
@@ -893,6 +927,7 @@ def pn_transport_peek(trans, size):
   if size:
     bb = trans.impl.head()
     bb.get(ba)
+    bb.position(0)
   return 0, ba.tostring()
 
 def pn_transport_pop(trans, size):
@@ -906,49 +941,72 @@ def pn_transport_push(trans, input):
   if cap < 0:
     return cap
   elif len(input) > cap:
-    return PN_OVERFLOW
-  else:
-    bb = trans.impl.tail()
-    bb.put(array(input, 'b'))
-    try:
-      trans.impl.process()
-      return 0
-    except TransportException, e:
-      trans.error = pn_error(PN_ERR, str(e))
-      return PN_ERR
+    input = input[:cap]
+
+  bb = trans.impl.tail()
+  bb.put(array(input, 'b'))
+  trans.impl.process()
+  return len(input)
 
 def pn_transport_close_head(trans):
-  try:
-    trans.impl.close_head()
-    return 0
-  except TransportException, e:
-    trans.error = pn_error(PN_ERR, str(e))
-    return PN_ERR
+  trans.impl.close_head()
+  return 0
 
 def pn_transport_close_tail(trans):
-  try:
-    trans.impl.close_tail()
-    return 0
-  except TransportException, e:
-    trans.error = pn_error(PN_ERR, str(e))
-    return PN_ERR
+  trans.impl.close_tail()
+  return 0
 
-def pn_transport_error(trans):
-  return trans.error
+def pn_transport_closed(trans):
+  return trans.impl.isClosed()
+
+def pn_transport_condition(trans):
+  trans.condition.decode(trans.impl.getCondition())
+  return trans.condition
 
 from org.apache.qpid.proton.engine import Event
 
-PN_EVENT_CATEGORY_PROTOCOL = Event.Category.PROTOCOL
+PN_REACTOR_INIT = Event.Type.REACTOR_INIT
+PN_REACTOR_QUIESCED = Event.Type.REACTOR_QUIESCED
+PN_REACTOR_FINAL = Event.Type.REACTOR_FINAL
 
-PN_CONNECTION_LOCAL_STATE = Event.Type.CONNECTION_LOCAL_STATE
-PN_CONNECTION_REMOTE_STATE = Event.Type.CONNECTION_REMOTE_STATE
-PN_SESSION_LOCAL_STATE = Event.Type.SESSION_LOCAL_STATE
-PN_SESSION_REMOTE_STATE = Event.Type.SESSION_REMOTE_STATE
-PN_LINK_LOCAL_STATE = Event.Type.LINK_LOCAL_STATE
-PN_LINK_REMOTE_STATE = Event.Type.LINK_REMOTE_STATE
+PN_TIMER_TASK = Event.Type.TIMER_TASK
+
+PN_CONNECTION_INIT = Event.Type.CONNECTION_INIT
+PN_CONNECTION_BOUND = Event.Type.CONNECTION_BOUND
+PN_CONNECTION_UNBOUND = Event.Type.CONNECTION_UNBOUND
+PN_CONNECTION_LOCAL_OPEN = Event.Type.CONNECTION_LOCAL_OPEN
+PN_CONNECTION_REMOTE_OPEN = Event.Type.CONNECTION_REMOTE_OPEN
+PN_CONNECTION_LOCAL_CLOSE = Event.Type.CONNECTION_LOCAL_CLOSE
+PN_CONNECTION_REMOTE_CLOSE = Event.Type.CONNECTION_REMOTE_CLOSE
+PN_CONNECTION_FINAL = Event.Type.CONNECTION_FINAL
+PN_SESSION_INIT = Event.Type.SESSION_INIT
+PN_SESSION_LOCAL_OPEN = Event.Type.SESSION_LOCAL_OPEN
+PN_SESSION_REMOTE_OPEN = Event.Type.SESSION_REMOTE_OPEN
+PN_SESSION_LOCAL_CLOSE = Event.Type.SESSION_LOCAL_CLOSE
+PN_SESSION_REMOTE_CLOSE = Event.Type.SESSION_REMOTE_CLOSE
+PN_SESSION_FINAL = Event.Type.SESSION_FINAL
+PN_LINK_INIT = Event.Type.LINK_INIT
+PN_LINK_LOCAL_OPEN = Event.Type.LINK_LOCAL_OPEN
+PN_LINK_REMOTE_OPEN = Event.Type.LINK_REMOTE_OPEN
+PN_LINK_LOCAL_CLOSE = Event.Type.LINK_LOCAL_CLOSE
+PN_LINK_REMOTE_CLOSE = Event.Type.LINK_REMOTE_CLOSE
+PN_LINK_LOCAL_DETACH = Event.Type.LINK_LOCAL_DETACH
+PN_LINK_REMOTE_DETACH = Event.Type.LINK_REMOTE_DETACH
 PN_LINK_FLOW = Event.Type.LINK_FLOW
+PN_LINK_FINAL = Event.Type.LINK_FINAL
 PN_DELIVERY = Event.Type.DELIVERY
 PN_TRANSPORT = Event.Type.TRANSPORT
+PN_TRANSPORT_ERROR = Event.Type.TRANSPORT_ERROR
+PN_TRANSPORT_HEAD_CLOSED = Event.Type.TRANSPORT_HEAD_CLOSED
+PN_TRANSPORT_TAIL_CLOSED = Event.Type.TRANSPORT_TAIL_CLOSED
+PN_TRANSPORT_CLOSED = Event.Type.TRANSPORT_CLOSED
+PN_SELECTABLE_INIT = Event.Type.SELECTABLE_INIT
+PN_SELECTABLE_UPDATED = Event.Type.SELECTABLE_UPDATED
+PN_SELECTABLE_READABLE = Event.Type.SELECTABLE_READABLE
+PN_SELECTABLE_WRITABLE = Event.Type.SELECTABLE_WRITABLE
+PN_SELECTABLE_EXPIRED = Event.Type.SELECTABLE_EXPIRED
+PN_SELECTABLE_ERROR = Event.Type.SELECTABLE_ERROR
+PN_SELECTABLE_FINAL = Event.Type.SELECTABLE_FINAL
 
 def pn_collector():
   return Proton.collector()
@@ -956,8 +1014,18 @@ def pn_collector():
 def pn_connection_collect(conn, coll):
   conn.impl.collect(coll)
 
+class pn_event:
+
+  def __init__(self, impl):
+    self.impl = impl
+    self.attachments = {}
+
 def pn_collector_peek(coll):
-  return coll.peek()
+  ev = coll.peek()
+  if ev:
+    return pn_event(ev.copy())
+  else:
+    return None
 
 def pn_collector_pop(coll):
   coll.pop()
@@ -965,29 +1033,60 @@ def pn_collector_pop(coll):
 def pn_collector_free(coll):
   pass
 
+def pn_event_reactor(event):
+  return None
+
 def pn_event_connection(event):
-  return wrap(event.getConnection(), pn_connection_wrapper)
+  return wrap(event.impl.getConnection(), pn_connection_wrapper)
 
 def pn_event_session(event):
-  return wrap(event.getSession(), pn_session_wrapper)
+  return wrap(event.impl.getSession(), pn_session_wrapper)
 
 def pn_event_link(event):
-  return wrap(event.getLink(), pn_link_wrapper)
+  return wrap(event.impl.getLink(), pn_link_wrapper)
 
 def pn_event_delivery(event):
-  return wrap(event.getDelivery(), pn_delivery_wrapper)
+  return wrap(event.impl.getDelivery(), pn_delivery_wrapper)
 
 def pn_event_transport(event):
-  return wrap(event.getTransport(), pn_transport_wrapper)
+  return wrap(event.impl.getTransport(), pn_transport_wrapper)
+
+from org.apache.qpid.proton.engine.impl import ConnectionImpl, SessionImpl, \
+  SenderImpl, ReceiverImpl, DeliveryImpl, TransportImpl
+
+J2C = {
+  ConnectionImpl: "pn_connection",
+  SessionImpl: "pn_session",
+  SenderImpl: "pn_link",
+  ReceiverImpl: "pn_link",
+  DeliveryImpl: "pn_delivery",
+  TransportImpl: "pn_transport"
+}
+
+wrappers = {
+  "pn_connection": lambda x: wrap(x, pn_connection_wrapper),
+  "pn_session": lambda x: wrap(x, pn_session_wrapper),
+  "pn_link": lambda x: wrap(x, pn_link_wrapper),
+  "pn_delivery": lambda x: wrap(x, pn_delivery_wrapper),
+  "pn_transport": lambda x: wrap(x, pn_transport_wrapper),
+  "pn_void": lambda x: x
+}
 
 def pn_event_class(event):
-  return event.getClass()
+  ctx = event.impl.getContext()
+  return J2C.get(ctx.getClass(), "pn_void")
+
+def pn_event_context(event):
+  return wrappers[pn_event_class(event)](event.impl.getContext())
 
 def pn_event_type(event):
-  return event.getType()
+  return event.impl.getType()
 
 def pn_event_type_name(etype):
   return str(etype)
 
 def pn_event_category(event):
-  return event.getCategory()
+  return event.impl.getCategory()
+
+def pn_event_attachments(event):
+  return event.attachments

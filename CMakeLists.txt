@@ -18,16 +18,24 @@
 #
 cmake_minimum_required (VERSION 2.6)
 
-option(BUILD_WITH_CXX "Compile Proton using C++" OFF)
-if ("${CMAKE_GENERATOR}" MATCHES "^Visual Studio")
+# Set default build type. Must come before project() which sets default to ""
+set (CMAKE_BUILD_TYPE RelWithDebInfo CACHE string
+  "Build type: Debug, Release, RelWithDebInfo or MinSizeRel (default RelWithDebInfo)")
+if (CMAKE_BUILD_TYPE MATCHES "Deb")
+  set (has_debug_symbols " (has debug symbols)")
+endif (CMAKE_BUILD_TYPE MATCHES "Deb")
+message(STATUS "Build type is \"${CMAKE_BUILD_TYPE}\"${has_debug_symbols}")
+
+project (Proton C)
+
+if (MSVC)
   # No C99 capability, use C++
-  set(BUILD_WITH_CXX ON)
-endif ("${CMAKE_GENERATOR}" MATCHES "^Visual Studio")
+  set(DEFAULT_BUILD_WITH_CXX ON)
+endif (MSVC)
+option(BUILD_WITH_CXX "Compile Proton using C++" ${DEFAULT_BUILD_WITH_CXX})
 
 if (BUILD_WITH_CXX)
   project (Proton C CXX)
-else (BUILD_WITH_CXX)
-  project (Proton C)
 endif (BUILD_WITH_CXX)
 
 file(READ version.txt PN_VERSION_FILE)
@@ -77,12 +85,7 @@ mark_as_advanced (INCLUDE_INSTALL_DIR LIB_INSTALL_DIR SYSCONF_INSTALL_DIR SHARE_
 # system specified locations.
 set (BINDINGS_DIR ${LIB_INSTALL_DIR}/proton/bindings)
 
-set (SYSINSTALL_BINDINGS "*UNSPECIFIED*" CACHE BOOL "If SYSINSTALL_BINDINGS is OFF then proton bindings will be installed underneath ${BINDINGS_DIR} and each user will need to modify their interpreter configuration to load the appropriate binding. If SYSINSTALL_BINDINGS is ON, then each language interpreter will be queried for the appropriate directory and proton bindings will be installed and available system wide with no additional per user configuration.")
-
-if (SYSINSTALL_BINDINGS STREQUAL "*UNSPECIFIED*")
-  message(WARNING "SYSINSTALL_BINDINGS is unspecified, defaulting it to OFF. Please note that the default install behaviour of proton has changed. Proton bindings by default will now be installed under ${BINDINGS_DIR} and will no longer be found by system interpreters. This means that every user will be required to manually configure their interpreters to locate the proton bindings. If you wish proton bindings to be installed into the interpreter specified locations as was the default in prior releases, please specify -DSYSINSTALL_BINDINGS=ON")
-  set (SYSINSTALL_BINDINGS OFF)
-endif ()
+set (SYSINSTALL_BINDINGS OFF CACHE BOOL "If SYSINSTALL_BINDINGS is OFF then proton bindings will be installed underneath ${BINDINGS_DIR} and each user will need to modify their interpreter configuration to load the appropriate binding. If SYSINSTALL_BINDINGS is ON, then each language interpreter will be queried for the appropriate directory and proton bindings will be installed and available system wide with no additional per user configuration.")
 
 set (BINDING_LANGS PERL PHP PYTHON RUBY)
 
@@ -94,14 +97,6 @@ foreach (LANG ${BINDING_LANGS})
     set (CHECK_SYSINSTALL_${LANG} OFF)
   endif ()
 endforeach()
-
-if (WIN32)
-  set (EXAMPLES_INSTALL_DIR proton/examples)
-endif (WIN32)
-
-if (UNIX)
-  set (EXAMPLES_INSTALL_DIR ${SHARE_INSTALL_DIR}/proton/examples)
-endif (UNIX)
 
 set (PROTON_SHARE ${SHARE_INSTALL_DIR}/proton-${PN_VERSION})
 # End of variables used during install
@@ -131,18 +126,8 @@ add_subdirectory(proton-c)
 install (FILES LICENSE README TODO
          DESTINATION ${PROTON_SHARE})
 
-# install the C messenger example
-install (FILES examples/messenger/c/CMakeLists.txt
-               examples/messenger/c/send.c
-               examples/messenger/c/recv.c
-         DESTINATION ${EXAMPLES_INSTALL_DIR}/messenger)
-
-install (FILES examples/include/pncompat/internal/LICENSE
-               examples/include/pncompat/internal/getopt.c
-               examples/include/pncompat/internal/getopt.h
-               examples/include/pncompat/misc_defs.h
-               examples/include/pncompat/misc_funcs.inc
-         DESTINATION ${EXAMPLES_INSTALL_DIR}/messenger/pncompat)
+install (DIRECTORY examples
+         DESTINATION ${PROTON_SHARE})
 
 # add relevant CTest support
 find_program (MAVEN_EXE mvn DOC "Location of the maven program")
@@ -152,3 +137,9 @@ if (JAVA_FOUND AND MAVEN_EXE)
 else (JAVA_FOUND AND MAVEN_EXE)
   message (STATUS "Cannot find both Java and Maven: testing disabled for Proton-J")
 endif (JAVA_FOUND AND MAVEN_EXE)
+
+# Generate test environment settings
+configure_file(${CMAKE_SOURCE_DIR}/config.sh.in
+               ${CMAKE_BINARY_DIR}/config.sh @ONLY)
+configure_file(${CMAKE_SOURCE_DIR}/config.bat.in
+               ${CMAKE_BINARY_DIR}/config.bat @ONLY)

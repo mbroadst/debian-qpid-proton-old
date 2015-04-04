@@ -29,11 +29,17 @@
 %header %{
 /* Include the headers needed by the code in this wrapper file */
 #include <proton/types.h>
+#include <proton/connection.h>
+#include <proton/condition.h>
+#include <proton/delivery.h>
+#include <proton/event.h>
 #include <proton/message.h>
-#include <proton/driver.h>
-#include <proton/driver_extras.h>
 #include <proton/messenger.h>
-#include <proton/ssl.h>
+#include <proton/session.h>
+#include <proton/url.h>
+#include <proton/reactor.h>
+#include <proton/handlers.h>
+#include <proton/sasl.h>
 
 #define zend_error_noreturn zend_error
 %}
@@ -175,32 +181,6 @@ ssize_t pn_sasl_send(pn_sasl_t *sasl, char *STRING, size_t LENGTH);
 %}
 %ignore pn_message_encode;
 
-%rename(pn_message_save) wrap_pn_message_save;
-%inline %{
-    void wrap_pn_message_save(pn_message_t *message, size_t maxCount, char **OUTPUT_BUFFER, ssize_t *OUTPUT_LEN) {
-        *OUTPUT_BUFFER = emalloc(sizeof(char) * maxCount);
-        *OUTPUT_LEN = maxCount;
-        int err = pn_message_save(message, *OUTPUT_BUFFER, OUTPUT_LEN);
-        if (err) {
-          *OUTPUT_LEN = err;
-          efree(*OUTPUT_BUFFER);
-        }
-    }
-%}
-%ignore pn_message_save;
-
-%rename(pn_message_data) wrap_pn_message_data;
-// in PHP:  array = pn_message_data("binary message data", MAXLEN);
-//          array[0] = size || error code
-//          array[1] = native string containing binary data
-%inline %{
-    void wrap_pn_message_data(char *STRING, size_t LENGTH, char **OUTPUT_BUFFER, ssize_t *OUTPUT_LEN, size_t count) {
-        *OUTPUT_BUFFER = emalloc(sizeof(char) * count);
-        *OUTPUT_LEN = pn_message_data(*OUTPUT_BUFFER, count, STRING, LENGTH );
-    }
-%}
-%ignore pn_message_data;
-
 
 
 //
@@ -236,7 +216,7 @@ ssize_t pn_sasl_send(pn_sasl_t *sasl, char *STRING, size_t LENGTH);
 %inline %{
     void wrap_pn_delivery_tag(pn_delivery_t *d, const char **RETURN_STRING, size_t *RETURN_LEN) {
         pn_delivery_tag_t tag = pn_delivery_tag(d);
-        *RETURN_STRING = tag.bytes;
+        *RETURN_STRING = tag.start;
         *RETURN_LEN = tag.size;
     }
 %}
@@ -260,100 +240,5 @@ ssize_t pn_sasl_send(pn_sasl_t *sasl, char *STRING, size_t LENGTH);
     *$result = *(zval *)($1);
     zval_copy_ctor($result);
 }
-
-
-// increment reference count of PHP_CONTEXT on input:
-pn_listener_t *pn_listener(pn_driver_t *driver, const char *host, const char *port, void *PHP_CONTEXT);
-%ignore pn_listener;
-
-// increment reference count of PHP_CONTEXT on input:
-pn_listener_t *pn_listener_fd(pn_driver_t *driver, int fd, void *PHP_CONTEXT);
-%ignore pn_listener_fd;
-
-
-%rename(pn_listener_context) wrap_pn_listener_context;
-%inline {
-    void *wrap_pn_listener_context(pn_listener_t *l) {
-        zval *result = pn_listener_context(l);
-        if (!result) {  // convert to PHP NULL
-            ALLOC_INIT_ZVAL(result);
-            ZVAL_NULL(result);
-        }
-        return result;
-    }
-}
-%ignore pn_listener_context;
-
-%rename(pn_listener_set_context) wrap_pn_listener_set_context;
-%inline {
-    void wrap_pn_listener_set_context(pn_listener_t *l, void *PHP_CONTEXT) {
-        zval *old = pn_listener_context(l);
-        if (old) {
-            zval_ptr_dtor(&old);  // drop the reference taken on input
-        }
-        pn_listener_set_context(l, PHP_CONTEXT);
-    }
-}
-%ignore pn_listener_set_context;
-
-%rename(pn_listener_free) wrap_pn_listener_free;
-%inline %{
-  void wrap_pn_listener_free(pn_listener_t *l) {
-      zval *obj = pn_listener_context(l);
-      if (obj) {
-          zval_ptr_dtor(&obj);  // drop the reference taken on input
-      }
-      pn_listener_free(l);
-  }
-%}
-%ignore pn_listener_free;
-
-
-// increment reference count of PHP_CONTEXT on input:
-pn_connector_t *pn_connector(pn_driver_t *driver, const char *host, const char *port, void *PHP_CONTEXT);
-%ignore pn_connector;
-
-// increment reference count of PHP_CONTEXT on input:
-pn_connector_t *pn_connector_fd(pn_driver_t *driver, int fd, void *PHP_CONTEXT);
-%ignore pn_connector_fd;
-
-%rename(pn_connector_context) wrap_pn_connector_context;
-%inline {
-    void *wrap_pn_connector_context(pn_connector_t *c)
-    {
-        zval *result = pn_connector_context(c);
-        if (!result) {  // convert to PHP NULL
-            ALLOC_INIT_ZVAL(result);
-            ZVAL_NULL(result);
-        }
-        return result;
-    }
-}
-%ignore pn_connector_context;
-
-%rename(pn_connector_set_context) wrap_pn_connector_set_context;
-%inline {
-    void wrap_pn_connector_set_context(pn_connector_t *ctor, void *PHP_CONTEXT) {
-        zval *old = pn_connector_context(ctor);
-        if (old) {
-            zval_ptr_dtor(&old);  // drop the reference taken on input
-        }
-        pn_connector_set_context(ctor, PHP_CONTEXT);
-    }
-}
-%ignore pn_connector_set_context;
-
-%rename(pn_connector_free) wrap_pn_connector_free;
-%inline %{
-  void wrap_pn_connector_free(pn_connector_t *c) {
-      zval *obj = pn_connector_context(c);
-      if (obj) {
-          zval_ptr_dtor(&obj);  // drop the reference taken on input
-      }
-      pn_connector_free(c);
-  }
-%}
-%ignore pn_connector_free;
-
 
 %include "proton/cproton.i"

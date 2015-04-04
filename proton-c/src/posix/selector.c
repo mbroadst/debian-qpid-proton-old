@@ -24,16 +24,15 @@
 #include <poll.h>
 #include <stdlib.h>
 #include <assert.h>
-#include "../platform.h"
-#include "../selectable.h"
-#include "../util.h"
+#include "platform.h"
+#include "selectable.h"
+#include "util.h"
 
 struct pn_selector_t {
   struct pollfd *fds;
   pn_timestamp_t *deadlines;
   size_t capacity;
   pn_list_t *selectables;
-  pn_timestamp_t deadline;
   size_t current;
   pn_timestamp_t awoken;
   pn_error_t *error;
@@ -45,8 +44,7 @@ void pn_selector_initialize(void *obj)
   selector->fds = NULL;
   selector->deadlines = NULL;
   selector->capacity = 0;
-  selector->selectables = pn_list(0, 0);
-  selector->deadline = 0;
+  selector->selectables = pn_list(PN_WEAKREF, 0);
   selector->current = 0;
   selector->awoken = 0;
   selector->error = pn_error();
@@ -65,10 +63,10 @@ void pn_selector_finalize(void *obj)
 #define pn_selector_compare NULL
 #define pn_selector_inspect NULL
 
-pn_selector_t *pn_selector(void)
+pn_selector_t *pni_selector(void)
 {
-  static pn_class_t clazz = PN_CLASS(pn_selector);
-  pn_selector_t *selector = (pn_selector_t *) pn_new(sizeof(pn_selector_t), &clazz);
+  static const pn_class_t clazz = PN_CLASS(pn_selector);
+  pn_selector_t *selector = (pn_selector_t *) pn_class_new(&clazz, sizeof(pn_selector_t));
   return selector;
 }
 
@@ -98,16 +96,16 @@ void pn_selector_update(pn_selector_t *selector, pn_selectable_t *selectable)
 {
   int idx = pni_selectable_get_index(selectable);
   assert(idx >= 0);
-  selector->fds[idx].fd = pn_selectable_fd(selectable);
+  selector->fds[idx].fd = pn_selectable_get_fd(selectable);
   selector->fds[idx].events = 0;
   selector->fds[idx].revents = 0;
-  if (pn_selectable_capacity(selectable) > 0) {
+  if (pn_selectable_is_reading(selectable)) {
     selector->fds[idx].events |= POLLIN;
   }
-  if (pn_selectable_pending(selectable) > 0) {
+  if (pn_selectable_is_writing(selectable)) {
     selector->fds[idx].events |= POLLOUT;
   }
-  selector->deadlines[idx] = pn_selectable_deadline(selectable);
+  selector->deadlines[idx] = pn_selectable_get_deadline(selectable);
 }
 
 void pn_selector_remove(pn_selector_t *selector, pn_selectable_t *selectable)
@@ -126,6 +124,15 @@ void pn_selector_remove(pn_selector_t *selector, pn_selectable_t *selectable)
   }
 
   pni_selectable_set_index(selectable, -1);
+
+  if (selector->current >= (size_t) idx) {
+    selector->current--;
+  }
+}
+
+size_t pn_selector_size(pn_selector_t *selector) {
+  assert(selector);
+  return pn_list_size(selector->selectables);
 }
 
 int pn_selector_select(pn_selector_t *selector, int timeout)
@@ -144,7 +151,7 @@ int pn_selector_select(pn_selector_t *selector, int timeout)
 
     if (deadline) {
       pn_timestamp_t now = pn_i_now();
-      int delta = selector->deadline - now;
+      int64_t delta = deadline - now;
       if (delta < 0) {
         timeout = 0;
       } else if (delta < timeout) {
@@ -153,15 +160,16 @@ int pn_selector_select(pn_selector_t *selector, int timeout)
     }
   }
 
+  int error = 0;
   int result = poll(selector->fds, size, timeout);
   if (result == -1) {
-    pn_i_error_from_errno(selector->error, "poll");
+    error = pn_i_error_from_errno(selector->error, "poll");
   } else {
     selector->current = 0;
     selector->awoken = pn_i_now();
   }
 
-  return pn_error_code(selector->error);
+  return error;
 }
 
 pn_selectable_t *pn_selector_next(pn_selector_t *selector, int *events)
@@ -175,6 +183,11 @@ pn_selectable_t *pn_selector_next(pn_selector_t *selector, int *events)
     int ev = 0;
     if (pfd->revents & POLLIN) {
       ev |= PN_READABLE;
+    }
+    if ((pfd->revents & POLLERR) ||
+        (pfd->revents & POLLHUP) ||
+        (pfd->revents & POLLNVAL)) {
+      ev |= PN_ERROR;
     }
     if (pfd->revents & POLLOUT) {
       ev |= PN_WRITABLE;

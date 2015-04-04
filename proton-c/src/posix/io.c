@@ -21,6 +21,7 @@
 
 #include <proton/io.h>
 #include <proton/object.h>
+#include <proton/selector.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -34,7 +35,7 @@
 #include <fcntl.h>
 #include <assert.h>
 
-#include "../platform.h"
+#include "platform.h"
 
 #define MAX_HOST (1024)
 #define MAX_SERV (64)
@@ -43,6 +44,7 @@ struct pn_io_t {
   char host[MAX_HOST];
   char serv[MAX_SERV];
   pn_error_t *error;
+  pn_selector_t *selector;
   bool wouldblock;
 };
 
@@ -51,6 +53,7 @@ void pn_io_initialize(void *obj)
   pn_io_t *io = (pn_io_t *) obj;
   io->error = pn_error();
   io->wouldblock = false;
+  io->selector = NULL;
 }
 
 void pn_io_finalize(void *obj)
@@ -65,8 +68,8 @@ void pn_io_finalize(void *obj)
 
 pn_io_t *pn_io(void)
 {
-  static pn_class_t clazz = PN_CLASS(pn_io);
-  pn_io_t *io = (pn_io_t *) pn_new(sizeof(pn_io_t), &clazz);
+  static const pn_class_t clazz = PN_CLASS(pn_io);
+  pn_io_t *io = (pn_io_t *) pn_class_new(&clazz, sizeof(pn_io_t));
   return io;
 }
 
@@ -220,22 +223,34 @@ pn_socket_t pn_accept(pn_io_t *io, pn_socket_t socket, char *name, size_t size)
 #ifdef MSG_NOSIGNAL
 ssize_t pn_send(pn_io_t *io, pn_socket_t socket, const void *buf, size_t len) {
   ssize_t count = send(socket, buf, len, MSG_NOSIGNAL);
-  io->wouldblock = count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
+  io->wouldblock = (errno == EAGAIN || errno == EWOULDBLOCK);
+  if (count < 0) { pn_i_error_from_errno(io->error, "send"); }
   return count;
 }
 
 static inline int pn_create_socket(int af) {
-  return socket(af, SOCK_STREAM, getprotobyname("tcp")->p_proto);
+  struct protoent * pe_tcp = getprotobyname("tcp");
+  if (pe_tcp == NULL) {
+    return -1;
+  }
+  return socket(af, SOCK_STREAM, pe_tcp->p_proto);
 }
 #elif defined(SO_NOSIGPIPE)
 ssize_t pn_send(pn_io_t *io, pn_socket_t socket, const void *buf, size_t size) {
   ssize_t count = send(socket, buf, size, 0);
-  io->wouldblock = count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
+  io->wouldblock = (errno == EAGAIN || errno == EWOULDBLOCK);
+  if (count < 0) { pn_i_error_from_errno(io->error, "send"); }
   return count;
 }
 
 static inline int pn_create_socket(int af) {
-  int sock = socket(af, SOCK_STREAM, getprotobyname("tcp")->p_proto);
+  struct protoent * pe_tcp;
+  int sock;
+  pe_tcp = getprotobyname("tcp");
+  if (pe_tcp == NULL) {
+    return -1;
+  }
+  sock = socket(af, SOCK_STREAM, pe_tcp->p_proto);
   if (sock == -1) return sock;
 
   int optval = 1;
@@ -253,6 +268,7 @@ ssize_t pn_recv(pn_io_t *io, pn_socket_t socket, void *buf, size_t size)
 {
   ssize_t count = recv(socket, buf, size, 0);
   io->wouldblock = count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
+  if (count < 0) { pn_i_error_from_errno(io->error, "recv"); }
   return count;
 }
 
@@ -274,4 +290,11 @@ void pn_close(pn_io_t *io, pn_socket_t socket)
 bool pn_wouldblock(pn_io_t *io)
 {
   return io->wouldblock;
+}
+
+pn_selector_t *pn_io_selector(pn_io_t *io)
+{
+  if (io->selector == NULL)
+    io->selector = pni_selector();
+  return io->selector;
 }

@@ -24,6 +24,7 @@
 
 #include <proton/import_export.h>
 #include <proton/type_compat.h>
+#include <proton/condition.h>
 #include <stddef.h>
 #include <sys/types.h>
 
@@ -83,14 +84,32 @@ typedef void (*pn_tracer_t)(pn_transport_t *transport, const char *message);
 
 /**
  * Factory for creating a transport.
- *
  * A transport is used by a connection to interface with the network.
  * There can only be one connection associated with a transport. See
  * pn_transport_bind().
  *
+ * Initially a transport is configured to be a client transport. Use pn_transport_set_server()
+ * to configure the transport as a server transport.
+ *
+ * A client transport initiates outgoing connections.
+ *
+ * A client transport must be configured with the protocol layers to use and cannot
+ * configure itself automatically.
+ *
+ * A server transport accepts incoming connections. It can automatically
+ * configure itself to include the various protocol layers depending on
+ * the incoming protocol headers.
+ *
  * @return pointer to new transport
  */
 PN_EXTERN pn_transport_t *pn_transport(void);
+
+/**
+ * Configure a transport as a server
+ *
+ * @param[in] transport a transport object
+ */
+PN_EXTERN void pn_transport_set_server(pn_transport_t *transport);
 
 /**
  * Free a transport object.
@@ -103,20 +122,23 @@ PN_EXTERN pn_transport_t *pn_transport(void);
 PN_EXTERN void pn_transport_free(pn_transport_t *transport);
 
 /**
- * Get additional error information associated with the transport.
+ * Get additional information about the condition of the transport.
  *
- * Whenever a transport operation fails (i.e. returns an error code),
- * additional error details can be obtained using this function. The
- * error object that is returned may also be used to clear the error
- * condition.
+ * When a PN_TRANSPORT_ERROR event occurs, this operation can be used
+ * to access the details of the error condtion.
  *
  * The pointer returned by this operation is valid until the
  * transport object is freed.
  *
  * @param[in] transport the transport object
- * @return the transport's error object
+ * @return the transport's condition object
  */
-PN_EXTERN pn_error_t *pn_transport_error(pn_transport_t *transport);
+PN_EXTERN pn_condition_t *pn_transport_condition(pn_transport_t *transport);
+
+/**
+ * @deprecated
+ */
+PN_EXTERN  pn_error_t *pn_transport_error(pn_transport_t *transport);
 
 /**
  * Binds the transport to an AMQP connection.
@@ -175,6 +197,7 @@ PN_EXTERN pn_tracer_t pn_transport_get_tracer(pn_transport_t *transport);
 PN_EXTERN void *pn_transport_get_context(pn_transport_t *transport);
 
 /**
+ * @deprecated
  * Set a new application context for a transport object.
  *
  * The application context for a transport object may be retrieved using
@@ -186,6 +209,14 @@ PN_EXTERN void *pn_transport_get_context(pn_transport_t *transport);
 PN_EXTERN void pn_transport_set_context(pn_transport_t *transport, void *context);
 
 /**
+ * Get the attachments that are associated with a transport object.
+ *
+ * @param[in] transport the transport whose attachments are to be returned.
+ * @return the attachments for the transport object
+ */
+PN_EXTERN pn_record_t *pn_transport_attachments(pn_transport_t *transport);
+
+/**
  * Log a message using a transport's logging mechanism.
  *
  * This can be useful in a debugging context as the log message will
@@ -195,6 +226,19 @@ PN_EXTERN void pn_transport_set_context(pn_transport_t *transport, void *context
  * @param[in] message the message to be logged
  */
 PN_EXTERN void pn_transport_log(pn_transport_t *transport, const char *message);
+
+/**
+ * Log a printf formatted message using a transport's logging
+ * mechanism.
+ *
+ * This can be useful in a debugging context as the log message will
+ * be prefixed with the transport's identifier.
+ *
+ * @param[in] transport a transport object
+ * @param[in] fmt the printf formatted message to be logged
+ * @param[in] ap a vector containing the format arguments
+ */
+PN_EXTERN void pn_transport_vlogf(pn_transport_t *transport, const char *fmt, va_list ap);
 
 /**
  * Log a printf formatted message using a transport's logging
@@ -328,16 +372,17 @@ PN_EXTERN char *pn_transport_tail(pn_transport_t *transport);
  *
  * This is equivalent to copying @c size bytes afther the tail pointer
  * and then calling ::pn_transport_process with an argument of @c
- * size. It is an error to call this with a @c size larger than the
- * capacity reported by ::pn_transport_capacity.
+ * size. Only some of the bytes will be copied if there is
+ * insufficienty capacity available. Use ::pn_transport_capacity to
+ * determine how much capacity the transport has.
  *
  * @param[in] transport the transport
  * @param[in] src the start of the data to push into the transport
  * @param[in] size the amount of data to push into the transport
  *
- * @return 0 on success, or error code if < 0
+ * @return the number of bytes pushed on success, or error code if < 0
  */
-PN_EXTERN int pn_transport_push(pn_transport_t *transport, const char *src, size_t size);
+PN_EXTERN ssize_t pn_transport_push(pn_transport_t *transport, const char *src, size_t size);
 
 /**
  * Process input data following the tail pointer.
@@ -404,9 +449,9 @@ PN_EXTERN const char *pn_transport_head(pn_transport_t *transport);
  * @param[in] transport the transport
  * @param[out] dst the destination buffer
  * @param[in] size the capacity of the destination buffer
- * @return 0 on success, or error code if < 0
+ * @return number of bytes copied on success, or error code if < 0
  */
-PN_EXTERN int pn_transport_peek(pn_transport_t *transport, char *dst, size_t size);
+PN_EXTERN ssize_t pn_transport_peek(pn_transport_t *transport, char *dst, size_t size);
 
 /**
  * Removes @c size bytes of output from the pending output queue
@@ -483,6 +528,14 @@ PN_EXTERN uint64_t pn_transport_get_frames_output(const pn_transport_t *transpor
  * @return the number of frames input by the transport
  */
 PN_EXTERN uint64_t pn_transport_get_frames_input(const pn_transport_t *transport);
+
+/** Access the AMQP Connection associated with the transport.
+ *
+ * @param[in] transport a transport object
+ * @return the connection context for the transport, or NULL if
+ *         none
+ */
+PN_EXTERN pn_connection_t *pn_transport_connection(pn_transport_t *transport);
 
 #ifdef __cplusplus
 }

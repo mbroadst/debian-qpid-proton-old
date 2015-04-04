@@ -55,6 +55,7 @@ void pn_subscription_finalize(void *obj)
   pn_free(sub->address);
 }
 
+#define CID_pn_subscription CID_pn_object
 #define pn_subscription_hashcode NULL
 #define pn_subscription_compare NULL
 #define pn_subscription_inspect NULL
@@ -64,14 +65,14 @@ pn_subscription_t *pn_subscription(pn_messenger_t *messenger,
                                    const char *host,
                                    const char *port)
 {
-  static pn_class_t clazz = PN_CLASS(pn_subscription);
-  pn_subscription_t *sub = (pn_subscription_t *) pn_new(sizeof(pn_subscription_t), &clazz);
+  static const pn_class_t clazz = PN_CLASS(pn_subscription);
+  pn_subscription_t *sub = (pn_subscription_t *) pn_class_new(&clazz, sizeof(pn_subscription_t));
   sub->messenger = messenger;
   pn_string_set(sub->scheme, scheme);
   pn_string_set(sub->host, host);
   pn_string_set(sub->port, port);
   pni_messenger_add_subscription(messenger, sub);
-  pn_decref(sub);
+  pn_class_decref(PN_OBJECT, sub);
   return sub;
 }
 

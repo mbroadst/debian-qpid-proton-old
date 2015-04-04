@@ -23,6 +23,7 @@
  */
 
 #include <proton/import_export.h>
+#include <stddef.h>
 #include <sys/types.h>
 #include <proton/type_compat.h>
 
@@ -44,6 +45,7 @@ extern "C" {
 
 typedef int32_t  pn_sequence_t;
 typedef uint32_t pn_millis_t;
+#define PN_MILLIS_MAX -1U
 typedef uint32_t pn_seconds_t;
 typedef int64_t  pn_timestamp_t;
 typedef uint32_t pn_char_t;
@@ -58,11 +60,10 @@ typedef struct {
 
 typedef struct {
   size_t size;
-  char *start;
+  const char *start;
 } pn_bytes_t;
 
-PN_EXTERN pn_bytes_t pn_bytes(size_t size, char *start);
-PN_EXTERN pn_bytes_t pn_bytes_dup(size_t size, const char *start);
+PN_EXTERN pn_bytes_t pn_bytes(size_t size, const char *start);
 
 /** @}
  */

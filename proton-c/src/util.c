@@ -27,7 +27,6 @@
 #include <ctype.h>
 #include <string.h>
 #include <proton/error.h>
-#include <proton/util.h>
 #include <proton/types.h>
 #include "util.h"
 
@@ -139,20 +138,28 @@ void pni_urldecode(const char *src, char *dst)
 
 // Parse URL syntax:
 // [ <scheme> :// ] [ <user> [ : <password> ] @ ] <host> [ : <port> ] [ / <path> ]
-// <user>, <password>, <host>, <port> cannot contain any of '@', ':', '/'
+// <scheme>, <user>, <password>, <port> cannot contain any of '@', ':', '/'
+// If the first character of <host> is '[' then it can contain any character up to ']' (this is to allow IPv6
+// literal syntax). Otherwise it also cannot contain '@', ':', '/'
+// <host> is not optional but it can be null! If it is not present an empty string will be returned
 // <path> can contain any character
 void pni_parse_url(char *url, char **scheme, char **user, char **pass, char **host, char **port, char **path)
 {
   if (!url) return;
 
-  char *scheme_end = strstr(url, "://");
-  if (scheme_end) {
-    *scheme_end = '\0';
-    *scheme = url;
-    url = scheme_end + 3;
+  char *slash = strchr(url, '/');
+
+  if (slash && slash>url) {
+    char *scheme_end = strstr(slash-1, "://");
+
+    if (scheme_end && scheme_end<slash) {
+      *scheme_end = '\0';
+      *scheme = url;
+      url = scheme_end + 3;
+      slash = strchr(url, '/');
+    }
   }
 
-  char *slash = strchr(url, '/');
   if (slash) {
     *slash = '\0';
     *path = slash + 1;
@@ -192,21 +199,21 @@ void pni_parse_url(char *url, char **scheme, char **user, char **pass, char **ho
   if (*pass) pni_urldecode(*pass, *pass);
 }
 
-void pn_vfatal(const char *fmt, va_list ap)
+void pni_vfatal(const char *fmt, va_list ap)
 {
   vfprintf(stderr, fmt, ap);
   abort();
 }
 
-void pn_fatal(const char *fmt, ...)
+void pni_fatal(const char *fmt, ...)
 {
   va_list ap;
   va_start(ap, fmt);
-  pn_vfatal(fmt, ap);
+  pni_vfatal(fmt, ap);
   va_end(ap);
 }
 
-static bool pn_i_eq_nocase(const char *a, const char *b)
+bool pni_eq_nocase(const char *a, const char *b)
 {
     while (*b) {
         if (tolower(*a++) != tolower(*b++))
@@ -215,11 +222,20 @@ static bool pn_i_eq_nocase(const char *a, const char *b)
     return !(*a);
 }
 
+bool pni_eq_n_nocase(const char *a, const char *b, int len)
+{
+  while (*b && len-- > 0 ) {
+    if (tolower(*a++) != tolower(*b++))
+      return false;
+  }
+  return !(*a) && !(*b);
+}
+
 bool pn_env_bool(const char *name)
 {
   char *v = getenv(name);
-  return v && (pn_i_eq_nocase(v, "true") || pn_i_eq_nocase(v, "1") ||
-               pn_i_eq_nocase(v, "yes") || pn_i_eq_nocase(v, "on"));
+  return v && (pni_eq_nocase(v, "true") || pni_eq_nocase(v, "1") ||
+               pni_eq_nocase(v, "yes") || pni_eq_nocase(v, "on"));
 }
 
 char *pn_strdup(const char *src)

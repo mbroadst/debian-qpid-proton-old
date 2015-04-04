@@ -17,13 +17,15 @@
 # under the License.
 #
 
+from unittest import TestCase
 from random import randint
 from threading import Thread
 from socket import socket, AF_INET, SOCK_STREAM
 from subprocess import Popen,PIPE,STDOUT
-import sys, os
-from proton import Driver, Connection, Transport, SASL, Endpoint, Delivery, \
-    SSLDomain, SSLUnavailable
+import sys, os, string
+from proton import Connection, Transport, SASL, Endpoint, Delivery, SSL
+from proton.reactor import Container
+from proton.handlers import CHandshaker, CFlowController
 
 
 def free_tcp_ports(count=1):
@@ -46,56 +48,48 @@ def free_tcp_ports(count=1):
     s.close()
   return ports
 
+def free_tcp_port():
+  return free_tcp_ports(1)[0]
+
+def pump_uni(src, dst, buffer_size=1024):
+  p = src.pending()
+  c = dst.capacity()
+
+  if c < 0:
+    if p < 0:
+      return False
+    else:
+      src.close_head()
+      return True
+
+  if p < 0:
+    dst.close_tail()
+  elif p == 0 or c == 0:
+    return False
+  else:
+    bytes = src.peek(min(c, buffer_size))
+    dst.push(bytes)
+    src.pop(len(bytes))
+
+  return True
 
 def pump(transport1, transport2, buffer_size=1024):
   """ Transfer all pending bytes between two Proton engines
-      by repeatedly calling input and output.
+      by repeatedly calling peek/pop and push.
       Asserts that each engine accepts some bytes every time
       (unless it's already closed).
   """
-
-  out1_leftover_by_t2 = ""
-  out2_leftover_by_t1 = ""
-  i = 0
-
-  while True:
-    out1 = out1_leftover_by_t2 + (transport1.output(buffer_size) or "")
-    out2 = out2_leftover_by_t1 + (transport2.output(buffer_size) or "")
-
-    if out1:
-      number_t2_consumed = transport2.input(out1)
-      if number_t2_consumed is None:
-        # special None return value means input is closed so discard the leftovers
-        out1_leftover_by_t2 = ""
-      else:
-        assert number_t2_consumed > 0, (number_t2_consumed, len(out1), out1[:100])
-        out1_leftover_by_t2 = out1[number_t2_consumed:]
-
-    if out2:
-      number_t1_consumed = transport1.input(out2)
-      if number_t1_consumed is None:
-        # special None return value means input is closed so discard the leftovers
-        out2_leftover_by_t1 = ""
-      else:
-        assert number_t1_consumed > 0, (number_t1_consumed, len(out1), out1[:100])
-        out2_leftover_by_t1 = out2[number_t1_consumed:]
-
-    if not out1 and not out2: break
-    i = i + 1
+  while (pump_uni(transport1, transport2, buffer_size) or
+         pump_uni(transport2, transport1, buffer_size)):
+    pass
 
 def isSSLPresent():
-    """ True if a suitable SSL library is available.
-    """
-    try:
-        xxx = SSLDomain(SSLDomain.MODE_CLIENT)
-        return True
-    except SSLUnavailable, e:
-        # SSL libraries not installed
-        return False
+    return SSL.present()
 
-class Test(object):
+class Test(TestCase):
 
   def __init__(self, name):
+    super(Test, self).__init__(name)
     self.name = name
 
   def configure(self, config):
@@ -120,6 +114,7 @@ class Test(object):
   def verbose(self):
     return int(self.default("verbose", 0))
 
+
 class Skipped(Exception):
   skipped = True
 
@@ -129,195 +124,59 @@ class TestServer(object):
   """
   def __init__(self, **kwargs):
     self.args = kwargs
-    self.driver = Driver()
+    self.reactor = Container(self)
     self.host = "127.0.0.1"
     self.port = 0
     if "host" in kwargs:
       self.host = kwargs["host"]
     if "port" in kwargs:
       self.port = kwargs["port"]
-    self.driver_timeout = -1
-    self.credit_batch = 10
+    self.handlers = [CFlowController(10), CHandshaker()]
     self.thread = Thread(name="server-thread", target=self.run)
     self.thread.daemon = True
     self.running = True
+    self.conditions = []
 
   def start(self):
+    self.reactor.start()
     retry = 0
     if self.port == 0:
       self.port = str(randint(49152, 65535))
       retry = 10
-    self.listener = self.driver.listener(self.host, self.port)
-    while not self.listener and retry > 0:
-      retry -= 1
-      self.port = str(randint(49152, 65535))
-      self.listener = self.driver.listener(self.host, self.port)
-    assert self.listener, "No free port for server to listen on!"
+    while retry > 0:
+      try:
+        self.acceptor = self.reactor.acceptor(self.host, self.port)
+        break
+      except IOError:
+        self.port = str(randint(49152, 65535))
+        retry -= 1
+    assert retry > 0, "No free port for server to listen on!"
     self.thread.start()
 
   def stop(self):
     self.running = False
-    self.driver.wakeup()
+    self.reactor.wakeup()
     self.thread.join()
-    if self.listener:
-      self.listener.close()
-    cxtr = self.driver.head_connector()
-    while cxtr:
-      if not cxtr.closed:
-        cxtr.close()
-      cxtr = cxtr.next()
 
   # Note: all following methods all run under the thread:
 
   def run(self):
-    while self.running:
-      self.driver.wait(self.driver_timeout)
-      self.process_listeners()
-      self.process_connectors()
+    self.reactor.timeout = 3.14159265359
+    while self.reactor.process():
+      if not self.running:
+        self.acceptor.close()
+        self.reactor.stop()
+        break
 
-
-  def process_listeners(self):
-    """ Service each pending listener
-    """
-    l = self.driver.pending_listener()
-    while l:
-      cxtr = l.accept()
-      assert(cxtr)
-      self.init_connector(cxtr)
-      l = self.driver.pending_listener()
-
-  def init_connector(self, cxtr):
-    """ Initialize a newly accepted connector
-    """
-    sasl = cxtr.sasl()
-    sasl.mechanisms("ANONYMOUS")
-    sasl.server()
-    cxtr.connection = Connection()
+  def on_connection_bound(self, event):
     if "idle_timeout" in self.args:
-      cxtr.transport.idle_timeout = self.args["idle_timeout"]
+      event.transport.idle_timeout = self.args["idle_timeout"]
 
-  def process_connectors(self):
-    """ Service each pending connector
-    """
-    cxtr = self.driver.pending_connector()
-    while cxtr:
-      self.process_connector(cxtr)
-      cxtr = self.driver.pending_connector()
+  def on_connection_local_close(self, event):
+    self.conditions.append(event.connection.condition)
 
-  def process_connector(self, cxtr):
-    """ Process a pending connector
-    """
-    if not cxtr.closed:
-      cxtr.process()
-      sasl = cxtr.sasl()
-      if sasl.state != SASL.STATE_PASS:
-        self.authenticate_connector(cxtr)
-      else:
-        conn = cxtr.connection
-        if conn:
-          self.service_connection(conn)
-      cxtr.process()
-
-  def authenticate_connector(self, cxtr):
-    """ Deal with a connector that has not passed SASL
-    """
-    # by default, just permit anyone
-    sasl = cxtr.sasl()
-    if sasl.state == SASL.STATE_STEP:
-      sasl.done(SASL.OK)
-
-  def service_connection(self, conn):
-    """ Process a Connection
-    """
-    if conn.state == Endpoint.LOCAL_UNINIT | Endpoint.REMOTE_UNINIT:
-      conn.open()
-
-    # open all pending sessions
-    ssn = conn.session_head(Endpoint.LOCAL_UNINIT)
-    while ssn:
-      self.init_session(ssn)
-      ssn.open()
-      ssn = ssn.next(Endpoint.LOCAL_UNINIT)
-
-    # configure and open any pending links
-    link = conn.link_head(Endpoint.LOCAL_UNINIT)
-    while link:
-      self.init_link(link)
-      link.open()
-      link = link.next(Endpoint.LOCAL_UNINIT);
-
-    ## Step 2: Now drain all the pending deliveries from the connection's
-    ## work queue and process them
-
-    delivery = conn.work_head
-    while delivery:
-      self.process_delivery(delivery)
-      delivery = conn.work_head
-
-    ## Step 3: Clean up any links or sessions that have been closed by the
-    ## remote.  If the connection has been closed remotely, clean that up
-    ## also.
-
-    # teardown any terminating links
-    link = conn.link_head(Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_CLOSED)
-    while link:
-      link.close()
-      link = link.next(Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_CLOSED)
-
-    # teardown any terminating sessions
-    ssn = conn.session_head(Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_CLOSED)
-    while ssn:
-      ssn.close(ssn)
-      ssn = ssn.next(Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_CLOSED)
-
-    if conn.state == Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_CLOSED:
-      conn.close()
-
-  def init_session(self, ssn):
-    """ Test-specific Session initialization
-    """
-    pass
-
-  def init_link(self, link):
-    """ Test-specific Link initialization
-    """
-    pass
-
-  def process_delivery(self, delivery):
-    """ Test-specific Delivery processing.
-    """
-    pass
-
-
-class TestServerDrain(TestServer):
-  """ A primitive test server that accepts connections and simply discards any
-  messages sent to it.
-  """
-  def __init__(self, **kwargs):
-    TestServer.__init__(self, **kwargs)
-
-  def init_link(self, link):
-    """ Test-specific Link initialization
-    """
-    if link.is_receiver:
-      link.flow(self.credit_batch)
-
-  def process_delivery(self, delivery):
-    """ Just drop any incomming messages
-    """
-    link = delivery.link
-    if delivery.readable:   # inbound data available
-      m = link.recv(1024)
-      while m:
-        #print("Dropping msg...%s" % str(m))
-        m = link.recv(1024)
-      delivery.update(Delivery.ACCEPTED)
-      delivery.settle()
-    else:
-      link.advance()
-    if link.credit == 0:
-      link.flow(self.credit_batch)
-
+  def on_delivery(self, event):
+    event.delivery.settle()
 
 #
 # Classes that wrap the messenger applications msgr-send and msgr-recv.
@@ -335,6 +194,16 @@ class MessengerApp(object):
         self.password = None
         self._output = None
 
+    def findfile(self, filename, searchpath):
+        """Find filename in the searchpath
+            return absolute path to the file or None
+        """
+        paths = string.split(searchpath, os.pathsep)
+        for path in paths:
+            if os.path.exists(os.path.join(path, filename)):
+                return os.path.abspath(os.path.join(path, filename))
+        return None
+
     def start(self, verbose=False):
         """ Begin executing the test """
         cmd = self.cmdline()
@@ -343,8 +212,20 @@ class MessengerApp(object):
             print("COMMAND='%s'" % str(cmd))
         #print("ENV='%s'" % str(os.environ.copy()))
         try:
+            if os.name=="nt":
+                # Windows handles python launch by replacing script 'filename' with
+                # 'python abspath-to-filename' in cmdline arg list.
+                if cmd[0].endswith('.py'):
+                    foundfile = self.findfile(cmd[0], os.environ['PATH'])
+                    if foundfile is None:
+                        foundfile = self.findfile(cmd[0], os.environ['PYTHONPATH'])
+                        assert foundfile is not None, "Unable to locate file '%s' in PATH or PYTHONPATH" % cmd[0]
+                    del cmd[0:1]
+                    cmd.insert(0, foundfile)
+                    cmd.insert(0, sys.executable)
             self._process = Popen(cmd, stdout=PIPE, stderr=STDOUT, bufsize=4096)
         except OSError, e:
+            print("ERROR: '%s'" % e)
             assert False, "Unable to execute command '%s', is it in your PATH?" % cmd[0]
         self._ready()  # wait for it to initialize
 
@@ -514,7 +395,7 @@ class MessengerReceiver(MessengerApp):
     def _ready(self):
         """ wait for subscriptions to complete setup. """
         r = self._process.stdout.readline()
-        assert r == "READY\n", "Unexpected input while waiting for receiver to initialize: %s" % r
+        assert r == "READY" + os.linesep, "Unexpected input while waiting for receiver to initialize: %s" % r
 
 class MessengerSenderC(MessengerSender):
     def __init__(self):
@@ -566,4 +447,42 @@ class MessengerReceiverPython(MessengerReceiver):
         self._command = ["msgr-recv.py"]
 
 
+
+class ReactorSenderC(MessengerSender):
+    def __init__(self):
+        MessengerSender.__init__(self)
+        self._command = ["reactor-send"]
+
+class ReactorSenderValgrind(ReactorSenderC):
+    """ Run the C sender under Valgrind
+    """
+    def __init__(self, suppressions=None):
+        if "VALGRIND" not in os.environ:
+            raise Skipped("Skipping test - $VALGRIND not set.")
+        ReactorSenderC.__init__(self)
+        if not suppressions:
+            suppressions = os.path.join(os.path.dirname(__file__),
+                                        "valgrind.supp" )
+        self._command = [os.environ["VALGRIND"], "--error-exitcode=1", "--quiet",
+                         "--trace-children=yes", "--leak-check=full",
+                         "--suppressions=%s" % suppressions] + self._command
+
+class ReactorReceiverC(MessengerReceiver):
+    def __init__(self):
+        MessengerReceiver.__init__(self)
+        self._command = ["reactor-recv"]
+
+class ReactorReceiverValgrind(ReactorReceiverC):
+    """ Run the C receiver under Valgrind
+    """
+    def __init__(self, suppressions=None):
+        if "VALGRIND" not in os.environ:
+            raise Skipped("Skipping test - $VALGRIND not set.")
+        ReactorReceiverC.__init__(self)
+        if not suppressions:
+            suppressions = os.path.join(os.path.dirname(__file__),
+                                        "valgrind.supp" )
+        self._command = [os.environ["VALGRIND"], "--error-exitcode=1", "--quiet",
+                         "--trace-children=yes", "--leak-check=full",
+                         "--suppressions=%s" % suppressions] + self._command
 

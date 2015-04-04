@@ -20,6 +20,7 @@ import mllib, os, sys
 
 doc = mllib.xml_parse(os.path.join(os.path.dirname(__file__), "transport.xml"))
 mdoc = mllib.xml_parse(os.path.join(os.path.dirname(__file__), "messaging.xml"))
+tdoc = mllib.xml_parse(os.path.join(os.path.dirname(__file__), "transactions.xml"))
 sdoc = mllib.xml_parse(os.path.join(os.path.dirname(__file__), "security.xml"))
 
 def eq(attr, value):
@@ -27,13 +28,15 @@ def eq(attr, value):
 
 TYPES = doc.query["amqp/section/type", eq("@class", "composite")] + \
     mdoc.query["amqp/section/type", eq("@class", "composite")] + \
+    tdoc.query["amqp/section/type", eq("@class", "composite")] + \
     sdoc.query["amqp/section/type", eq("@class", "composite")] + \
     mdoc.query["amqp/section/type", eq("@provides", "section")]
 RESTRICTIONS = {}
 COMPOSITES = {}
 
 for type in doc.query["amqp/section/type"] + mdoc.query["amqp/section/type"] + \
-      sdoc.query["amqp/section/type"]:
+    sdoc.query["amqp/section/type"] + tdoc.query["amqp/section/type"]:
+
   source = type["@source"]
   if source:
     RESTRICTIONS[type["@name"]] = source

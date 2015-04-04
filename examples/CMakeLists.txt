@@ -19,4 +19,5 @@
 
 set (Proton_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_subdirectory(messenger/c)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_subdirectory(c/messenger)

@@ -54,8 +54,8 @@ static void pn_decoder_finalize(void *obj) {
 
 pn_decoder_t *pn_decoder()
 {
-  static pn_class_t clazz = PN_CLASS(pn_decoder);
-  return (pn_decoder_t *) pn_new(sizeof(pn_decoder_t), &clazz);
+  static const pn_class_t clazz = PN_CLASS(pn_decoder);
+  return (pn_decoder_t *) pn_class_new(&clazz, sizeof(pn_decoder_t));
 }
 
 static inline uint8_t pn_decoder_readf8(pn_decoder_t *decoder)
@@ -137,9 +137,9 @@ static inline pn_type_t pn_code2type(uint8_t code)
     return PN_SHORT;
   case PNE_UINT0:
   case PNE_SMALLUINT:
-  case PNE_SMALLINT:
   case PNE_UINT:
     return PN_UINT;
+  case PNE_SMALLINT:
   case PNE_INT:
     return PN_INT;
   case PNE_UTF32:
@@ -147,6 +147,7 @@ static inline pn_type_t pn_code2type(uint8_t code)
   case PNE_FLOAT:
     return PN_FLOAT;
   case PNE_LONG:
+  case PNE_SMALLLONG:
     return PN_LONG;
   case PNE_MS64:
     return PN_TIMESTAMP;
@@ -162,7 +163,6 @@ static inline pn_type_t pn_code2type(uint8_t code)
     return PN_UUID;
   case PNE_ULONG0:
   case PNE_SMALLULONG:
-  case PNE_SMALLLONG:
   case PNE_ULONG:
     return PN_ULONG;
   case PNE_VBIN8:
@@ -246,7 +246,7 @@ int pn_decoder_decode_value(pn_decoder_t *decoder, pn_data_t *data, uint8_t code
     break;
   case PNE_SMALLINT:
     if (!pn_decoder_remaining(decoder)) return PN_UNDERFLOW;
-    err = pn_data_put_int(data, pn_decoder_readf8(decoder));
+    err = pn_data_put_int(data, (int8_t)pn_decoder_readf8(decoder));
     break;
   case PNE_INT:
     if (pn_decoder_remaining(decoder) < 4) return PN_UNDERFLOW;
@@ -297,7 +297,7 @@ int pn_decoder_decode_value(pn_decoder_t *decoder, pn_data_t *data, uint8_t code
     break;
   case PNE_SMALLLONG:
     if (!pn_decoder_remaining(decoder)) return PN_UNDERFLOW;
-    err = pn_data_put_long(data, pn_decoder_readf8(decoder));
+    err = pn_data_put_long(data, (int8_t)pn_decoder_readf8(decoder));
     break;
   case PNE_DECIMAL128:
     if (pn_decoder_remaining(decoder) < 16) return PN_UNDERFLOW;
@@ -395,7 +395,7 @@ int pn_decoder_decode_value(pn_decoder_t *decoder, pn_data_t *data, uint8_t code
         int e = pn_decoder_decode_type(decoder, data, &acode);
         if (e) return e;
         pn_type_t type = pn_code2type(acode);
-        if (type < 0) return type;
+        if ((int)type < 0) return (int)type;
         for (size_t i = 0; i < count; i++)
         {
           e = pn_decoder_decode_value(decoder, data, acode);

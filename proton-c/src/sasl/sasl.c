@@ -19,93 +19,124 @@
  *
  */
 
+#include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <proton/buffer.h>
-#include <proton/framing.h>
-#include <proton/engine.h> // XXX: just needed for PN_EOS
+#include <proton/error.h>
 #include <proton/sasl.h>
+
+#include "buffer.h"
 #include "protocol.h"
-#include "../dispatcher/dispatcher.h"
-#include "../engine/engine-internal.h"
-#include "../util.h"
+#include "dispatch_actions.h"
+#include "framing/framing.h"
+#include "engine/engine-internal.h"
+#include "dispatcher/dispatcher.h"
+#include "util.h"
+#include "transport/autodetect.h"
 
-#define SCRATCH (1024)
 
-struct pn_sasl_t {
-  pn_transport_t *transport;
-  pn_io_layer_t *io_layer;
-  size_t header_count;
-  pn_dispatcher_t *disp;
-  bool client;
-  bool configured;
+struct pni_sasl_t {
   char *mechanisms;
   char *remote_mechanisms;
   pn_buffer_t *send_data;
   pn_buffer_t *recv_data;
   pn_sasl_outcome_t outcome;
+  bool client;
+  bool allow_skip;
   bool sent_init;
   bool rcvd_init;
   bool sent_done;
   bool rcvd_done;
-  char scratch[SCRATCH];
+  bool halt;
+  bool input_bypass;
+  bool output_bypass;
 };
 
-static ssize_t pn_input_read_sasl_header(pn_io_layer_t *io_layer, const char *bytes, size_t available);
-static ssize_t pn_input_read_sasl(pn_io_layer_t *io_layer, const char *bytes, size_t available);
-static ssize_t pn_output_write_sasl_header(pn_io_layer_t *io_layer, char *bytes, size_t available);
-static ssize_t pn_output_write_sasl(pn_io_layer_t *io_layer, char *bytes, size_t available);
+static inline pn_transport_t *get_transport_internal(pn_sasl_t *sasl)
+{
+    // The external pn_sasl_t is really a pointer to the internal pni_transport_t
+    return ((pn_transport_t *)sasl);
+}
 
-int pn_do_init(pn_dispatcher_t *disp);
-int pn_do_mechanisms(pn_dispatcher_t *disp);
-int pn_do_challenge(pn_dispatcher_t *disp);
-int pn_do_response(pn_dispatcher_t *disp);
-int pn_do_outcome(pn_dispatcher_t *disp);
+static inline pni_sasl_t *get_sasl_internal(pn_sasl_t *sasl)
+{
+    // The external pn_sasl_t is really a pointer to the internal pni_transport_t
+    return sasl ? ((pn_transport_t *)sasl)->sasl : NULL;
+}
+
+static ssize_t pn_input_read_sasl_header(pn_transport_t* transport, unsigned int layer, const char* bytes, size_t available);
+static ssize_t pn_input_read_sasl(pn_transport_t *transport, unsigned int layer, const char *bytes, size_t available);
+static ssize_t pn_output_write_sasl_header(pn_transport_t* transport, unsigned int layer, char* bytes, size_t size);
+static ssize_t pn_output_write_sasl(pn_transport_t *transport, unsigned int layer, char *bytes, size_t available);
+
+const pn_io_layer_t sasl_header_layer = {
+    pn_input_read_sasl_header,
+    pn_output_write_sasl_header,
+    NULL,
+    NULL
+};
+
+const pn_io_layer_t sasl_write_header_layer = {
+    pn_input_read_sasl,
+    pn_output_write_sasl_header,
+    NULL,
+    NULL
+};
+
+const pn_io_layer_t sasl_read_header_layer = {
+    pn_input_read_sasl_header,
+    pn_output_write_sasl,
+    NULL,
+    NULL
+};
+
+const pn_io_layer_t sasl_layer = {
+    pn_input_read_sasl,
+    pn_output_write_sasl,
+    NULL,
+    NULL
+};
+
+static void pni_emit(pn_sasl_t *sasl) {
+  pn_transport_t *transport = get_transport_internal(sasl);
+  if (transport->connection && transport->connection->collector) {
+    pn_collector_t *collector = transport->connection->collector;
+    pn_collector_put(collector, PN_OBJECT, transport, PN_TRANSPORT);
+  }
+}
 
 pn_sasl_t *pn_sasl(pn_transport_t *transport)
 {
   if (!transport->sasl) {
-    pn_sasl_t *sasl = (pn_sasl_t *) malloc(sizeof(pn_sasl_t));
-    sasl->disp = pn_dispatcher(1, transport);
-    sasl->disp->batch = false;
+    pni_sasl_t *sasl = (pni_sasl_t *) malloc(sizeof(pni_sasl_t));
 
-    pn_dispatcher_action(sasl->disp, SASL_INIT, pn_do_init);
-    pn_dispatcher_action(sasl->disp, SASL_MECHANISMS, pn_do_mechanisms);
-    pn_dispatcher_action(sasl->disp, SASL_CHALLENGE, pn_do_challenge);
-    pn_dispatcher_action(sasl->disp, SASL_RESPONSE, pn_do_response);
-    pn_dispatcher_action(sasl->disp, SASL_OUTCOME, pn_do_outcome);
-
-    sasl->client = false;
-    sasl->configured = false;
+    sasl->client = !transport->server;
     sasl->mechanisms = NULL;
     sasl->remote_mechanisms = NULL;
     sasl->send_data = pn_buffer(16);
     sasl->recv_data = pn_buffer(16);
     sasl->outcome = PN_SASL_NONE;
+    sasl->allow_skip = true;
     sasl->sent_init = false;
     sasl->rcvd_init = false;
     sasl->sent_done = false;
     sasl->rcvd_done = false;
+    sasl->input_bypass = false;
+    sasl->output_bypass = false;
+    sasl->halt = false;
 
     transport->sasl = sasl;
-    sasl->transport = transport;
-    sasl->io_layer = &transport->io_layers[PN_IO_SASL];
-    sasl->io_layer->context = sasl;
-    sasl->io_layer->process_input = pn_input_read_sasl_header;
-    sasl->io_layer->process_output = pn_output_write_sasl_header;
-    sasl->io_layer->process_tick = pn_io_layer_tick_passthru;
-
-    sasl->header_count = 0;
   }
 
-  return transport->sasl;
+  // The actual external pn_sasl_t pointer is a pointer to its enclosing pn_transport_t
+  return (pn_sasl_t *)transport;
 }
 
-pn_sasl_state_t pn_sasl_state(pn_sasl_t *sasl)
+pn_sasl_state_t pn_sasl_state(pn_sasl_t *sasl0)
 {
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
   if (sasl) {
-    if (!sasl->configured) return PN_SASL_CONF;
     if (sasl->outcome == PN_SASL_NONE) {
       return sasl->rcvd_init ? PN_SASL_STEP : PN_SASL_IDLE;
     } else {
@@ -119,19 +150,23 @@ pn_sasl_state_t pn_sasl_state(pn_sasl_t *sasl)
   }
 }
 
-void pn_sasl_mechanisms(pn_sasl_t *sasl, const char *mechanisms)
+void pn_sasl_mechanisms(pn_sasl_t *sasl0, const char *mechanisms)
 {
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
   if (!sasl) return;
   sasl->mechanisms = pn_strdup(mechanisms);
+  pni_emit(sasl0);
 }
 
-const char *pn_sasl_remote_mechanisms(pn_sasl_t *sasl)
+const char *pn_sasl_remote_mechanisms(pn_sasl_t *sasl0)
 {
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
   return sasl ? sasl->remote_mechanisms : NULL;
 }
 
-ssize_t pn_sasl_send(pn_sasl_t *sasl, const char *bytes, size_t size)
+ssize_t pn_sasl_send(pn_sasl_t *sasl0, const char *bytes, size_t size)
 {
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
   if (sasl) {
     if (pn_buffer_size(sasl->send_data)) {
       // XXX: need better error
@@ -139,14 +174,16 @@ ssize_t pn_sasl_send(pn_sasl_t *sasl, const char *bytes, size_t size)
     }
     int err = pn_buffer_append(sasl->send_data, bytes, size);
     if (err) return err;
+    pni_emit(sasl0);
     return size;
   } else {
     return PN_ARG_ERR;
   }
 }
 
-size_t pn_sasl_pending(pn_sasl_t *sasl)
+size_t pn_sasl_pending(pn_sasl_t *sasl0)
 {
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
   if (sasl && pn_buffer_size(sasl->recv_data)) {
     return pn_buffer_size(sasl->recv_data);
   } else {
@@ -154,8 +191,9 @@ size_t pn_sasl_pending(pn_sasl_t *sasl)
   }
 }
 
-ssize_t pn_sasl_recv(pn_sasl_t *sasl, char *bytes, size_t size)
+ssize_t pn_sasl_recv(pn_sasl_t *sasl0, char *bytes, size_t size)
 {
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
   if (!sasl) return PN_ARG_ERR;
 
   size_t bsize = pn_buffer_size(sasl->recv_data);
@@ -171,22 +209,31 @@ ssize_t pn_sasl_recv(pn_sasl_t *sasl, char *bytes, size_t size)
 
 void pn_sasl_client(pn_sasl_t *sasl)
 {
-  if (sasl) {
-    sasl->client = true;
-    sasl->configured = true;
-  }
 }
 
-void pn_sasl_server(pn_sasl_t *sasl)
+void pn_sasl_server(pn_sasl_t *sasl0)
 {
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
   if (sasl) {
     sasl->client = false;
-    sasl->configured = true;
   }
 }
 
-void pn_sasl_plain(pn_sasl_t *sasl, const char *username, const char *password)
+void pn_sasl_allow_skip(pn_sasl_t *sasl0, bool allow)
 {
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
+  if (sasl)
+    sasl->allow_skip = allow;
+}
+
+bool pn_sasl_skipping_allowed(pn_transport_t *transport)
+{
+  return transport && ( !transport->sasl || transport->sasl->allow_skip );
+}
+
+void pn_sasl_plain(pn_sasl_t *sasl0, const char *username, const char *password)
+{
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
   if (!sasl) return;
 
   const char *user = username ? username : "";
@@ -201,51 +248,60 @@ void pn_sasl_plain(pn_sasl_t *sasl, const char *username, const char *password)
   iresp[usize + 1] = 0;
   memmove(iresp + usize + 2, pass, psize);
 
-  pn_sasl_mechanisms(sasl, "PLAIN");
-  pn_sasl_send(sasl, iresp, size);
-  pn_sasl_client(sasl);
+  pn_sasl_mechanisms(sasl0, "PLAIN");
+  pn_sasl_send(sasl0, iresp, size);
   free(iresp);
 }
 
-void pn_sasl_done(pn_sasl_t *sasl, pn_sasl_outcome_t outcome)
+void pn_sasl_done(pn_sasl_t *sasl0, pn_sasl_outcome_t outcome)
 {
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
   if (sasl) {
     sasl->outcome = outcome;
+    // If we do this on the client it is a hack to tell us that
+    // no actual negatiation is going to happen and we can go
+    // straight to the AMQP layer
+    if (sasl->client) {
+      sasl->rcvd_done = true;
+      sasl->sent_done = true;
+    }
+    pni_emit(sasl0);
   }
 }
 
-pn_sasl_outcome_t pn_sasl_outcome(pn_sasl_t *sasl)
+pn_sasl_outcome_t pn_sasl_outcome(pn_sasl_t *sasl0)
 {
+  pni_sasl_t *sasl = get_sasl_internal(sasl0);
   return sasl ? sasl->outcome : PN_SASL_NONE;
 }
 
-void pn_sasl_trace(pn_sasl_t *sasl, pn_trace_t trace)
+void pn_sasl_free(pn_transport_t *transport)
 {
-  sasl->disp->trace = trace;
-}
-
-void pn_sasl_free(pn_sasl_t *sasl)
-{
-  if (sasl) {
-    free(sasl->mechanisms);
-    free(sasl->remote_mechanisms);
-    pn_buffer_free(sasl->send_data);
-    pn_buffer_free(sasl->recv_data);
-    pn_dispatcher_free(sasl->disp);
-    free(sasl);
+  if (transport) {
+    pni_sasl_t *sasl = transport->sasl;
+    if (sasl) {
+      free(sasl->mechanisms);
+      free(sasl->remote_mechanisms);
+      pn_buffer_free(sasl->send_data);
+      pn_buffer_free(sasl->recv_data);
+      free(sasl);
+    }
   }
 }
 
-void pn_client_init(pn_sasl_t *sasl)
+void pn_client_init(pn_transport_t *transport)
 {
-  pn_bytes_t bytes = pn_buffer_bytes(sasl->send_data);
-  pn_post_frame(sasl->disp, 0, "DL[sz]", SASL_INIT, sasl->mechanisms,
+  pni_sasl_t *sasl = transport->sasl;
+  pn_buffer_memory_t bytes = pn_buffer_memory(sasl->send_data);
+  pn_post_frame(transport, SASL_FRAME_TYPE, 0, "DL[sz]", SASL_INIT, sasl->mechanisms,
                 bytes.size, bytes.start);
   pn_buffer_clear(sasl->send_data);
+  pni_emit((pn_sasl_t *) transport);
 }
 
-void pn_server_init(pn_sasl_t *sasl)
+void pn_server_init(pn_transport_t *transport)
 {
+  pni_sasl_t *sasl = transport->sasl;
   // XXX
   char *mechs[16];
   int count = 0;
@@ -272,36 +328,40 @@ void pn_server_init(pn_sasl_t *sasl)
     }
   }
 
-  pn_post_frame(sasl->disp, 0, "DL[@T[*s]]", SASL_MECHANISMS, PN_SYMBOL, count, mechs);
+  pn_post_frame(transport, SASL_FRAME_TYPE, 0, "DL[@T[*s]]", SASL_MECHANISMS, PN_SYMBOL, count, mechs);
+  pni_emit((pn_sasl_t *) transport);
 }
 
-void pn_server_done(pn_sasl_t *sasl)
+void pn_server_done(pn_sasl_t *sasl0)
 {
-  pn_post_frame(sasl->disp, 0, "DL[B]", SASL_OUTCOME, sasl->outcome);
+  pn_transport_t *transport = get_transport_internal(sasl0);
+  pni_sasl_t *sasl = transport->sasl;
+  pn_post_frame(transport, SASL_FRAME_TYPE, 0, "DL[B]", SASL_OUTCOME, sasl->outcome);
+  pni_emit(sasl0);
 }
 
-void pn_sasl_process(pn_sasl_t *sasl)
+void pn_sasl_process(pn_transport_t *transport)
 {
-  if (!sasl->configured) return;
-
+  pni_sasl_t *sasl = transport->sasl;
   if (!sasl->sent_init) {
     if (sasl->client) {
-      pn_client_init(sasl);
+      pn_client_init(transport);
     } else {
-      pn_server_init(sasl);
+      pn_server_init(transport);
     }
     sasl->sent_init = true;
   }
 
   if (pn_buffer_size(sasl->send_data)) {
-    pn_bytes_t bytes = pn_buffer_bytes(sasl->send_data);
-    pn_post_frame(sasl->disp, 0, "DL[z]", sasl->client ? SASL_RESPONSE : SASL_CHALLENGE,
+    pn_buffer_memory_t bytes = pn_buffer_memory(sasl->send_data);
+    pn_post_frame(transport, SASL_FRAME_TYPE, 0, "DL[z]", sasl->client ? SASL_RESPONSE : SASL_CHALLENGE,
                   bytes.size, bytes.start);
     pn_buffer_clear(sasl->send_data);
+    pni_emit((pn_sasl_t *) transport);
   }
 
   if (!sasl->client && sasl->outcome != PN_SASL_NONE && !sasl->sent_done) {
-    pn_server_done(sasl);
+    pn_server_done((pn_sasl_t *)transport);
     sasl->sent_done = true;
   }
 
@@ -311,19 +371,20 @@ void pn_sasl_process(pn_sasl_t *sasl)
   //      or challenges) from client
   if (!sasl->client && sasl->sent_done && sasl->rcvd_init) {
     sasl->rcvd_done = true;
-    sasl->disp->halt = true;
+    sasl->halt = true;
   }
 }
 
-ssize_t pn_sasl_input(pn_sasl_t *sasl, const char *bytes, size_t available)
+ssize_t pn_sasl_input(pn_transport_t *transport, const char *bytes, size_t available)
 {
-  ssize_t n = pn_dispatcher_input(sasl->disp, bytes, available);
+  pni_sasl_t *sasl = transport->sasl;
+  ssize_t n = pn_dispatcher_input(transport, bytes, available, false, &sasl->halt);
   if (n < 0) return n;
 
-  pn_sasl_process(sasl);
+  pn_sasl_process(transport);
 
   if (sasl->rcvd_done) {
-    if (pn_sasl_state(sasl) == PN_SASL_PASS) {
+    if (pn_sasl_state((pn_sasl_t *)transport) == PN_SASL_PASS) {
       if (n) {
         return n;
       } else {
@@ -338,28 +399,30 @@ ssize_t pn_sasl_input(pn_sasl_t *sasl, const char *bytes, size_t available)
   }
 }
 
-ssize_t pn_sasl_output(pn_sasl_t *sasl, char *bytes, size_t size)
+ssize_t pn_sasl_output(pn_transport_t *transport, char *bytes, size_t size)
 {
-  pn_sasl_process(sasl);
+  pn_sasl_process(transport);
 
-  if (sasl->disp->available == 0 && sasl->sent_done) {
-    if (pn_sasl_state(sasl) == PN_SASL_PASS) {
+  pni_sasl_t *sasl = transport->sasl;
+  if (transport->available == 0 && sasl->sent_done) {
+    if (pn_sasl_state((pn_sasl_t *)transport) == PN_SASL_PASS) {
       return PN_EOS;
     } else {
       // XXX: should probably do something better here
       return PN_ERR;
     }
   } else {
-    return pn_dispatcher_output(sasl->disp, bytes, size);
+    return pn_dispatcher_output(transport, bytes, size);
   }
 }
 
-int pn_do_init(pn_dispatcher_t *disp)
+int pn_do_init(pn_transport_t *transport, uint8_t frame_type, uint16_t channel, pn_data_t *args, const pn_bytes_t *payload)
 {
-  pn_sasl_t *sasl = disp->transport->sasl;
+  pni_sasl_t *sasl = transport->sasl;
+  assert(sasl && !sasl->client);
   pn_bytes_t mech;
   pn_bytes_t recv;
-  int err = pn_scan_args(disp, "D.[sz]", &mech, &recv);
+  int err = pn_data_scan(args, "D.[sz]", &mech, &recv);
   if (err) return err;
   sasl->remote_mechanisms = pn_strndup(mech.start, mech.size);
   pn_buffer_append(sasl->recv_data, recv.start, recv.size);
@@ -367,105 +430,133 @@ int pn_do_init(pn_dispatcher_t *disp)
   return 0;
 }
 
-int pn_do_mechanisms(pn_dispatcher_t *disp)
+int pn_do_mechanisms(pn_transport_t *transport, uint8_t frame_type, uint16_t channel, pn_data_t *args, const pn_bytes_t *payload)
 {
-  pn_sasl_t *sasl = disp->transport->sasl;
+  pni_sasl_t *sasl = transport->sasl;
+  assert(sasl && sasl->client);
   sasl->rcvd_init = true;
   return 0;
 }
 
-int pn_do_recv(pn_dispatcher_t *disp)
+int pn_do_recv(pn_transport_t *transport, uint8_t frame_type, uint16_t channel, pn_data_t *args, const pn_bytes_t *payload)
 {
-  pn_sasl_t *sasl = disp->transport->sasl;
+  pni_sasl_t *sasl = transport->sasl;
   pn_bytes_t recv;
-  int err = pn_scan_args(disp, "D.[z]", &recv);
+  int err = pn_data_scan(args, "D.[z]", &recv);
   if (err) return err;
   pn_buffer_append(sasl->recv_data, recv.start, recv.size);
   return 0;
 }
 
-int pn_do_challenge(pn_dispatcher_t *disp)
+int pn_do_challenge(pn_transport_t *transport, uint8_t frame_type, uint16_t channel, pn_data_t *args, const pn_bytes_t *payload)
 {
-  return pn_do_recv(disp);
+#ifndef NDEBUG                  /* Avoid unused variable warnings in release builds. */
+  pni_sasl_t *sasl = transport->sasl;
+  assert(sasl && sasl->client);
+#endif
+  return pn_do_recv(transport, frame_type, channel, args, payload);
 }
 
-int pn_do_response(pn_dispatcher_t *disp)
+int pn_do_response(pn_transport_t *transport, uint8_t frame_type, uint16_t channel, pn_data_t *args, const pn_bytes_t *payload)
 {
-  return pn_do_recv(disp);
+#ifndef NDEBUG                  /* Avoid unused variable warnings in release builds. */
+  pni_sasl_t *sasl = transport->sasl;
+  assert(sasl && !sasl->client);
+#endif
+  return pn_do_recv(transport, frame_type, channel, args, payload);
 }
 
-int pn_do_outcome(pn_dispatcher_t *disp)
+int pn_do_outcome(pn_transport_t *transport, uint8_t frame_type, uint16_t channel, pn_data_t *args, const pn_bytes_t *payload)
 {
-  pn_sasl_t *sasl = disp->transport->sasl;
+  pni_sasl_t *sasl = transport->sasl;
+  assert(sasl && sasl->client);
   uint8_t outcome;
-  int err = pn_scan_args(disp, "D.[B]", &outcome);
+  int err = pn_data_scan(args, "D.[B]", &outcome);
   if (err) return err;
   sasl->outcome = (pn_sasl_outcome_t) outcome;
   sasl->rcvd_done = true;
   sasl->sent_done = true;
-  disp->halt = true;
+  sasl->halt = true;
+  pni_emit((pn_sasl_t *) transport);
   return 0;
 }
 
 #define SASL_HEADER ("AMQP\x03\x01\x00\x00")
 #define SASL_HEADER_LEN 8
 
-static ssize_t pn_input_read_sasl_header(pn_io_layer_t *io_layer, const char *bytes, size_t available)
+static ssize_t pn_input_read_sasl_header(pn_transport_t* transport, unsigned int layer, const char* bytes, size_t available)
 {
-  pn_sasl_t *sasl = (pn_sasl_t *)io_layer->context;
-  const char *point = SASL_HEADER + sasl->header_count;
-  int delta = pn_min(available, SASL_HEADER_LEN - sasl->header_count);
-  if (!available || memcmp(bytes, point, delta)) {
-    char quoted[1024];
-    pn_quote_data(quoted, 1024, bytes, available);
-    return pn_error_format(sasl->transport->error, PN_ERR,
-                           "%s header mismatch: '%s'", "SASL", quoted);
-  } else {
-    sasl->header_count += delta;
-    if (sasl->header_count == SASL_HEADER_LEN) {
-      sasl->io_layer->process_input = pn_input_read_sasl;
-      if (sasl->disp->trace & PN_TRACE_FRM)
-        pn_transport_logf(sasl->transport, "  <- %s", "SASL");
+  bool eos = pn_transport_capacity(transport)==PN_EOS;
+  pni_protocol_type_t protocol = pni_sniff_header(bytes, available);
+  switch (protocol) {
+  case PNI_PROTOCOL_AMQP_SASL:
+    if (transport->io_layers[layer] == &sasl_read_header_layer) {
+        transport->io_layers[layer] = &sasl_layer;
+    } else {
+        transport->io_layers[layer] = &sasl_write_header_layer;
     }
-    return delta;
-  }
-}
-
-static ssize_t pn_input_read_sasl(pn_io_layer_t *io_layer, const char *bytes, size_t available)
-{
-  pn_sasl_t *sasl = (pn_sasl_t *)io_layer->context;
-  ssize_t n = pn_sasl_input(sasl, bytes, available);
-  if (n == PN_EOS) {
-    sasl->io_layer->process_input = pn_io_layer_input_passthru;
-    pn_io_layer_t *io_next = sasl->io_layer->next;
-    return io_next->process_input( io_next, bytes, available );
-  }
-  return n;
-}
-
-static ssize_t pn_output_write_sasl_header(pn_io_layer_t *io_layer, char *bytes, size_t size)
-{
-  pn_sasl_t *sasl = (pn_sasl_t *)io_layer->context;
-  if (sasl->disp->trace & PN_TRACE_FRM)
-    pn_transport_logf(sasl->transport, "  -> %s", "SASL");
-  if (size >= SASL_HEADER_LEN) {
-    memmove(bytes, SASL_HEADER, SASL_HEADER_LEN);
-    sasl->io_layer->process_output = pn_output_write_sasl;
+    if (transport->trace & PN_TRACE_FRM)
+        pn_transport_logf(transport, "  <- %s", "SASL");
     return SASL_HEADER_LEN;
-  } else {
-    return pn_error_format(sasl->transport->error, PN_UNDERFLOW, "underflow writing %s header", "SASL");
+  case PNI_PROTOCOL_INSUFFICIENT:
+    if (!eos) return 0;
+    /* Fallthru */
+  default:
+    break;
   }
+  char quoted[1024];
+  pn_quote_data(quoted, 1024, bytes, available);
+  pn_do_error(transport, "amqp:connection:framing-error",
+              "%s header mismatch: %s ['%s']%s", "SASL", pni_protocol_name(protocol), quoted,
+              !eos ? "" : " (connection aborted)");
+  return PN_EOS;
 }
 
-static ssize_t pn_output_write_sasl(pn_io_layer_t *io_layer, char *bytes, size_t size)
+static ssize_t pn_input_read_sasl(pn_transport_t* transport, unsigned int layer, const char* bytes, size_t available)
 {
-  pn_sasl_t *sasl = (pn_sasl_t *)io_layer->context;
-  ssize_t n = pn_sasl_output(sasl, bytes, size);
-  if (n == PN_EOS) {
-    sasl->io_layer->process_output = pn_io_layer_output_passthru;
-    pn_io_layer_t *io_next = sasl->io_layer->next;
-    return io_next->process_output( io_next, bytes, size );
+  pni_sasl_t *sasl = transport->sasl;
+  if (!sasl->input_bypass) {
+    ssize_t n = pn_sasl_input(transport, bytes, available);
+    if (n != PN_EOS) return n;
+
+    sasl->input_bypass = true;
+    if (sasl->output_bypass)
+        transport->io_layers[layer] = &pni_passthru_layer;
   }
-  return n;
+  return pni_passthru_layer.process_input(transport, layer, bytes, available );
+}
+
+static ssize_t pn_output_write_sasl_header(pn_transport_t *transport, unsigned int layer, char *bytes, size_t size)
+{
+  if (transport->trace & PN_TRACE_FRM)
+    pn_transport_logf(transport, "  -> %s", "SASL");
+  assert(size >= SASL_HEADER_LEN);
+  memmove(bytes, SASL_HEADER, SASL_HEADER_LEN);
+  if (transport->io_layers[layer]==&sasl_write_header_layer) {
+      transport->io_layers[layer] = &sasl_layer;
+  } else {
+      transport->io_layers[layer] = &sasl_read_header_layer;
+  }
+  return SASL_HEADER_LEN;
+}
+
+static ssize_t pn_output_write_sasl(pn_transport_t* transport, unsigned int layer, char* bytes, size_t available)
+{
+  pni_sasl_t *sasl = transport->sasl;
+  if (!sasl->output_bypass) {
+    // this accounts for when pn_do_error is invoked, e.g. by idle timeout
+    ssize_t n;
+    if (transport->close_sent) {
+        n = PN_EOS;
+    } else {
+        n = pn_sasl_output(transport, bytes, available);
+    }
+    if (n != PN_EOS) return n;
+
+    sasl->output_bypass = true;
+    if (sasl->input_bypass)
+        transport->io_layers[layer] = &pni_passthru_layer;
+  }
+  return pni_passthru_layer.process_output(transport, layer, bytes, available );
 }
 

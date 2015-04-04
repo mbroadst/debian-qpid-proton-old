@@ -1,4 +1,4 @@
-#
+#--
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,15 +15,31 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-#
+#++
 
-module Qpid
+module Qpid # :nodoc:
 
-  module Proton
+  module Proton # :nodoc:
 
     # A Message represents an addressable quantity of data.
     #
+    # ==== Message Body
+    #
+    # The message body can be set using the #body= method. The message will
+    # then attempt to determine how exactly to encode the content.
+    #
     # ==== Examples
+    #
+    # To create a message for sending:
+    #
+    #   # send a simple text message
+    #   msg = Qpid::Proton::Message.new
+    #   msg.body = "STATE: update"
+    #
+    #   # send a binary chunk of data
+    #   data = File.binread("/home/qpid/binfile.tar.gz")
+    #   msg = Qpid::Proton::Message.new
+    #   msg.body = Qpid::Proton::BinaryString.new(data)
     #
     class Message
 
@@ -94,7 +110,7 @@ module Qpid
         annts.clear
         if !@annotations.nil?
           mapping = Qpid::Proton::Mapping.for_class(@annotations.class)
-          mapping.put(annts, @annotations)
+          mapping.put(annts, @annotations, :keys => :SYMBOL)
         end
         body = Qpid::Proton::Data.new(Cproton::pn_message_body(@impl))
         body.clear
@@ -372,6 +388,8 @@ module Qpid
       #
       # See MessageFormat for more details on formats.
       #
+      # *Warning:* This method has been deprecated.
+      #
       # ==== Options
       #
       # * format - the format
@@ -382,6 +400,12 @@ module Qpid
       end
 
       # Returns the message format
+      #
+      # *Warning:* This method has been deprecated.
+      #
+      # ==== Note
+      #
+      # This method is now deprecated.
       #
       def format
         Qpid::Proton::MessageFormat.by_value(Cproton.pn_message_get_format(@impl))
@@ -401,22 +425,6 @@ module Qpid
       #
       def content_type
         Cproton.pn_message_get_content_type(@impl)
-      end
-
-      # Sets the message content.
-      #
-      # ==== Options
-      #
-      # * content - the content
-      #
-      def content=(content)
-        Cproton.pn_message_load(@impl, content)
-      end
-
-      # Returns the message content.
-      #
-      def content
-        Cproton.pn_message_save(@impl, 1024)[1]
       end
 
       # Sets the content encoding type.
@@ -601,7 +609,7 @@ module Qpid
 
       def check(err) # :nodoc:
         if err < 0
-          raise DataError, "[#{err}]: #{Cproton.pn_message_error(@data)}"
+          raise DataError, "[#{err}]: #{Cproton.pn_message_error(@impl)}"
         else
           return err
         end

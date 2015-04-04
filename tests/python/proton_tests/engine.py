@@ -21,6 +21,7 @@ import os, common, gc
 from time import time, sleep
 from proton import *
 from common import pump
+from proton.reactor import Reactor
 
 # older versions of gc do not provide the garbage list
 if not hasattr(gc, "garbage"):
@@ -46,10 +47,8 @@ class Test(common.Test):
     c2 = Connection()
     t1 = Transport()
     t1.bind(c1)
-    c1._transport = t1
     t2 = Transport()
     t2.bind(c2)
-    c2._transport = t2
     self._wires.append((c1, t1, c2, t2))
 
     mask1 = 0
@@ -69,12 +68,12 @@ class Test(common.Test):
   def link(self, name, max_frame=None, idle_timeout=None):
     c1, c2 = self.connection()
     if max_frame:
-      c1._transport.max_frame_size = max_frame[0]
-      c2._transport.max_frame_size = max_frame[1]
+      c1.transport.max_frame_size = max_frame[0]
+      c2.transport.max_frame_size = max_frame[1]
     if idle_timeout:
       # idle_timeout in seconds expressed as float
-      c1._transport.idle_timeout = idle_timeout[0]
-      c2._transport.idle_timeout = idle_timeout[1]
+      c1.transport.idle_timeout = idle_timeout[0]
+      c2.transport.idle_timeout = idle_timeout[1]
     c1.open()
     c2.open()
     ssn1 = c1.session()
@@ -88,10 +87,6 @@ class Test(common.Test):
     return snd, rcv
 
   def cleanup(self):
-    # release resources created by this class
-    for w in self._wires:
-        w[0]._transport = None
-        w[2]._transport = None
     self._wires = []
 
   def pump(self, buffer_size=OUTPUT_SIZE):
@@ -215,10 +210,10 @@ class ConnectionTest(Test):
     assert self.c1.remote_properties == p2, (self.c2.remote_properties, p2)
 
   def test_channel_max(self, value=1234):
-    self.c1._transport.channel_max = value
+    self.c1.transport.channel_max = value
     self.c1.open()
     self.pump()
-    assert self.c2._transport.remote_channel_max == value, (self.c2._transport.remote_channel_max, value)
+    assert self.c2.transport.remote_channel_max == value, (self.c2.transport.remote_channel_max, value)
 
   def test_cleanup(self):
     self.c1.open()
@@ -226,8 +221,8 @@ class ConnectionTest(Test):
     self.pump()
     assert self.c1.state == Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE
     assert self.c2.state == Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE
-    t1 = self.c1._transport
-    t2 = self.c2._transport
+    t1 = self.c1.transport
+    t2 = self.c2.transport
     c2 = self.c2
     self.c1.close()
     # release all references to C1, except that held by the transport
@@ -389,7 +384,7 @@ class LinkTest(Test):
   def teardown(self):
     self.cleanup()
     gc.collect()
-    assert not gc.garbage
+    assert not gc.garbage, gc.garbage
 
   def test_open_close(self):
     assert self.snd.state == Endpoint.LOCAL_UNINIT | Endpoint.REMOTE_UNINIT
@@ -434,6 +429,40 @@ class LinkTest(Test):
 
     assert self.snd.state == Endpoint.LOCAL_CLOSED | Endpoint.REMOTE_CLOSED
     assert self.rcv.state == Endpoint.LOCAL_CLOSED | Endpoint.REMOTE_CLOSED
+
+  def test_reopen_on_same_session(self):
+    """
+    confirm that a link is correctly opened when attaching to a previously
+    detached link on the same session
+    """
+    assert self.snd.state == Endpoint.LOCAL_UNINIT | Endpoint.REMOTE_UNINIT
+    assert self.rcv.state == Endpoint.LOCAL_UNINIT | Endpoint.REMOTE_UNINIT
+
+    self.snd.open()
+    self.rcv.open()
+    self.pump()
+
+    assert self.snd.state == Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE
+    assert self.rcv.state == Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE
+
+    self.snd.close()
+    self.rcv.close()
+    self.pump()
+
+    assert self.snd.state == Endpoint.LOCAL_CLOSED | Endpoint.REMOTE_CLOSED
+    assert self.rcv.state == Endpoint.LOCAL_CLOSED | Endpoint.REMOTE_CLOSED
+
+    self.snd, self.rcv = self.link("test-link")
+    assert self.snd.state == Endpoint.LOCAL_UNINIT | Endpoint.REMOTE_UNINIT
+    assert self.rcv.state == Endpoint.LOCAL_UNINIT | Endpoint.REMOTE_UNINIT
+
+    self.snd.open()
+    self.rcv.open()
+    self.pump()
+
+    assert self.snd.state == Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE
+    assert self.rcv.state == Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE
+
 
   def test_simultaneous_open_close(self):
     assert self.snd.state == Endpoint.LOCAL_UNINIT | Endpoint.REMOTE_UNINIT
@@ -547,6 +576,9 @@ class LinkTest(Test):
   def test_target(self):
     self._test_source_target(None, TerminusConfig(address="target"))
 
+  def test_coordinator(self):
+    self._test_source_target(None, TerminusConfig(type=Terminus.COORDINATOR))
+
   def test_source_target_full(self):
     self._test_source_target(TerminusConfig(address="source",
                                             timeout=3,
@@ -619,8 +651,8 @@ class LinkTest(Test):
 
 class TerminusConfig:
 
-  def __init__(self, address=None, timeout=None, durability=None, filter=None,
-               capabilities=None, dynamic=False, dist_mode=None):
+  def __init__(self, type=None, address=None, timeout=None, durability=None,
+               filter=None, capabilities=None, dynamic=False, dist_mode=None):
     self.address = address
     self.timeout = timeout
     self.durability = durability
@@ -628,8 +660,11 @@ class TerminusConfig:
     self.capabilities = capabilities
     self.dynamic = dynamic
     self.dist_mode = dist_mode
+    self.type = type
 
   def __call__(self, terminus):
+    if self.type is not None:
+      terminus.type = self.type
     if self.address is not None:
       terminus.address = self.address
     if self.timeout is not None:
@@ -891,8 +926,8 @@ class MaxFrameTransferTest(Test):
     self.snd.open()
     self.rcv.open()
     self.pump()
-    assert self.rcv.session.connection._transport.max_frame_size == 512
-    assert self.snd.session.connection._transport.remote_max_frame_size == 512
+    assert self.rcv.session.connection.transport.max_frame_size == 512
+    assert self.snd.session.connection.transport.remote_max_frame_size == 512
 
     self.rcv.flow(1)
     self.snd.delivery("tag")
@@ -920,8 +955,8 @@ class MaxFrameTransferTest(Test):
     self.snd.open()
     self.rcv.open()
     self.pump()
-    assert self.rcv.session.connection._transport.max_frame_size == 521
-    assert self.snd.session.connection._transport.remote_max_frame_size == 521
+    assert self.rcv.session.connection.transport.max_frame_size == 521
+    assert self.snd.session.connection.transport.remote_max_frame_size == 521
 
     self.rcv.flow(2)
     self.snd.delivery("tag")
@@ -1017,10 +1052,10 @@ class IdleTimeoutTest(Test):
     self.rcv.open()
     self.pump()
     # proton advertises 1/2 the configured timeout to the peer:
-    assert self.rcv.session.connection._transport.idle_timeout == 2.0
-    assert self.rcv.session.connection._transport.remote_idle_timeout == 0.5
-    assert self.snd.session.connection._transport.idle_timeout == 1.0
-    assert self.snd.session.connection._transport.remote_idle_timeout == 1.0
+    assert self.rcv.session.connection.transport.idle_timeout == 2.0
+    assert self.rcv.session.connection.transport.remote_idle_timeout == 0.5
+    assert self.snd.session.connection.transport.idle_timeout == 1.0
+    assert self.snd.session.connection.transport.remote_idle_timeout == 1.0
 
   def testTimeout(self):
     """
@@ -1035,8 +1070,8 @@ class IdleTimeoutTest(Test):
     self.rcv.open()
     self.pump()
 
-    t_snd = self.snd.session.connection._transport
-    t_rcv = self.rcv.session.connection._transport
+    t_snd = self.snd.session.connection.transport
+    t_rcv = self.rcv.session.connection.transport
     assert t_rcv.idle_timeout == 0.0
     # proton advertises 1/2 the timeout (see spec)
     assert t_rcv.remote_idle_timeout == 0.5
@@ -1081,11 +1116,9 @@ class IdleTimeoutTest(Test):
     # now expire sndr
     clock = 1.499
     t_snd.tick(clock)
-    try:
-      self.pump()
-      assert False, "Expected connection timeout did not happen!"
-    except TransportException:
-      pass
+    self.pump()
+    assert self.c2.state & Endpoint.REMOTE_CLOSED
+    assert self.c2.remote_condition.name == "amqp:resource-limit-exceeded"
 
 class CreditTest(Test):
 
@@ -1342,8 +1375,8 @@ class CreditTest(Test):
     assert self.rcv.credit == 0
     assert self.rcv.queued == 0
 
-    #self.rcv.session.connection._transport.trace(Transport.TRACE_FRM)
-    #self.snd.session.connection._transport.trace(Transport.TRACE_FRM)
+    #self.rcv.session.connection.transport.trace(Transport.TRACE_FRM)
+    #self.snd.session.connection.transport.trace(Transport.TRACE_FRM)
 
     ## verify that a sender that has reached the drain state will respond
     ## promptly to a drain issued by the peer.
@@ -1812,46 +1845,32 @@ class ServerTest(Test):
     """
     if "java" in sys.platform:
       raise Skipped()
-    idle_timeout_secs = self.delay
-    self.server = common.TestServerDrain()
-    self.server.start()
-    self.driver = Driver()
-    self.cxtr = self.driver.connector(self.server.host, self.server.port)
-    self.cxtr.transport.idle_timeout = idle_timeout_secs
-    self.cxtr.sasl().mechanisms("ANONYMOUS")
-    self.cxtr.sasl().client()
-    self.conn = Connection()
-    self.cxtr.connection = self.conn
-    self.conn.open()
-    #self.session = self.conn.session()
-    #self.session.open()
-    #self.link = self.session.sender("test-sender")
-    #self.link.open()
+    idle_timeout = self.delay
+    server = common.TestServer()
+    server.start()
 
-    # wait for the connection to come up
+    class Program:
 
-    deadline = time() + self.timeout
-    while self.conn.state != (Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE) \
-          and time() <= deadline:
-      self.cxtr.process()
-      self.driver.wait(0.001)
-      self.cxtr.process()
+      def on_reactor_init(self, event):
+        self.conn = event.reactor.connection()
+        self.conn.hostname = "%s:%s" % (server.host, server.port)
+        self.conn.open()
+        self.old_count = None
+        event.reactor.schedule(3 * idle_timeout, self)
 
-    assert self.conn.state == (Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE), "Connection failed"
+      def on_connection_bound(self, event):
+        event.transport.idle_timeout = idle_timeout
 
-    # wait up to 3x the idle timeout
-    old_count = self.cxtr.transport.frames_input
-    duration = 3 * idle_timeout_secs
-    deadline = time() + duration
-    while time() <= deadline:
-      self.cxtr.process()
-      self.driver.wait(0.001)
-      self.cxtr.process()
+      def on_connection_remote_open(self, event):
+        self.old_count = event.transport.frames_input
 
-    assert self.conn.state == (Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE), "Connection terminated"
-    assert self.cxtr.transport.frames_input > old_count, "No idle frames received"
+      def on_timer_task(self, event):
+        assert self.conn.state == (Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE), "Connection terminated"
+        assert self.conn.transport.frames_input > self.old_count, "No idle frames received"
+        self.conn.close()
 
-    self.server.stop()
+    Reactor(Program()).run()
+    server.stop()
 
   def testIdleTimeout(self):
     """ Verify that a Connection is terminated properly when Idle frames do not
@@ -1859,56 +1878,40 @@ class ServerTest(Test):
     """
     if "java" in sys.platform:
       raise Skipped()
-    idle_timeout_secs = self.delay
-    self.server = common.TestServerDrain(idle_timeout=idle_timeout_secs)
-    self.server.start()
-    self.driver = Driver()
-    self.cxtr = self.driver.connector(self.server.host, self.server.port)
-    self.cxtr.sasl().mechanisms("ANONYMOUS")
-    self.cxtr.sasl().client()
-    self.conn = Connection()
-    self.cxtr.connection = self.conn
-    self.conn.open()
+    idle_timeout = self.delay
+    server = common.TestServer(idle_timeout=idle_timeout)
+    server.start()
 
-    # wait for the connection to come up
+    class Program:
 
-    deadline = time() + self.timeout
-    while self.conn.state != (Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE) \
-          and time() <= deadline:
-      self.cxtr.process()
-      self.driver.wait(self.timeout)
-      self.cxtr.process()
+      def on_reactor_init(self, event):
+        self.conn = event.reactor.connection()
+        self.conn.hostname = "%s:%s" % (server.host, server.port)
+        self.conn.open()
+        self.old_count = None
+        # verify the connection stays up even if we don't explicitly send stuff
+        # wait up to 3x the idle timeout
+        event.reactor.schedule(3 * idle_timeout, self)
 
-    assert self.conn.state == (Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE), "Connection failed"
+      def on_connection_remote_open(self, event):
+        self.old_count = event.transport.frames_output
 
-    # verify the connection stays up even if we don't explicitly send stuff
-    # wait up to 3x the idle timeout
-    old_count = self.cxtr.transport.frames_output
-    duration = 3 * idle_timeout_secs
-    deadline = time() + duration
-    while time() <= deadline:
-      self.cxtr.process()
-      self.driver.wait(10 * duration)
-      self.cxtr.process()
+      def on_connection_remote_close(self, event):
+        assert self.conn.remote_condition
+        assert self.conn.remote_condition.name == "amqp:resource-limit-exceeded"
 
-    assert self.conn.state == (Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE), "Connection terminated"
-    assert self.cxtr.transport.frames_output > old_count, "No idle frames sent"
+      def on_timer_task(self, event):
+        assert self.conn.state == (Endpoint.LOCAL_ACTIVE | Endpoint.REMOTE_ACTIVE), "Connection terminated"
+        assert self.conn.transport.frames_output > self.old_count, "No idle frames sent"
 
-    # now wait to explicitly cause the other side to expire:
+        # now wait to explicitly cause the other side to expire:
+        sleep(3 * idle_timeout)
 
-    sleep(idle_timeout_secs * 3)
-
-    # and check that the remote killed the connection:
-
-    deadline = time() + self.timeout
-    while (self.conn.state & Endpoint.REMOTE_ACTIVE) and time() <= deadline:
-      self.cxtr.process()
-      self.driver.wait(self.timeout)
-      self.cxtr.process()
-
-    assert self.conn.state & Endpoint.REMOTE_CLOSED, "Connection failed to close"
-
-    self.server.stop()
+    p = Program()
+    Reactor(p).run()
+    assert p.conn.remote_condition
+    assert p.conn.remote_condition.name == "amqp:resource-limit-exceeded"
+    server.stop()
 
 class NoValue:
 
@@ -2069,51 +2072,71 @@ class DeliveryTest(Test):
   def testCustom(self):
     self.testDisposition(type=0x12345, value=CustomValue([1, 2, 3]))
 
-class EventTest(Test):
+class CollectorTest(Test):
 
-  def teardown(self):
-    self.cleanup()
+  def setup(self):
+    self.collector = Collector()
 
-  def list(self, collector):
+  def drain(self):
     result = []
     while True:
-      e = collector.peek()
+      e = self.collector.peek()
       if e:
         result.append(e)
-        collector.pop()
+        self.collector.pop()
       else:
         break
     return result
 
-  def expect(self, collector, *types):
-    events = self.list(collector)
-    assert types == tuple([e.type for e in events]), (types, events)
-    if len(events) == 1:
-      return events[0]
-    elif len(events) > 1:
-      return events
+  def expect(self, *types):
+    return self.expect_oneof(types)
+
+  def expect_oneof(self, *sequences):
+    events = self.drain()
+    types = tuple([e.type for e in events])
+
+    for alternative in sequences:
+      if types == alternative:
+        if len(events) == 1:
+          return events[0]
+        elif len(events) > 1:
+          return events
+        else:
+          return
+
+    assert False, "actual events %s did not match any of the expected sequences: %s" % (events, sequences)
+
+  def expect_until(self, *types):
+    events = self.drain()
+    etypes = tuple([e.type for e in events[-len(types):]])
+    assert etypes == types, "actual events %s did not end in expect sequence: %s" % (events, types)
+
+class EventTest(CollectorTest):
+
+  def teardown(self):
+    self.cleanup()
 
   def testEndpointEvents(self):
     c1, c2 = self.connection()
-    coll = Collector()
-    c1.collect(coll)
-    self.expect(coll)
+    c1.collect(self.collector)
+    self.expect(Event.CONNECTION_INIT)
     self.pump()
-    self.expect(coll)
+    self.expect()
     c2.open()
     self.pump()
-    self.expect(coll, Event.CONNECTION_REMOTE_STATE)
+    self.expect(Event.CONNECTION_REMOTE_OPEN)
     self.pump()
-    self.expect(coll)
+    self.expect()
 
     ssn = c2.session()
     snd = ssn.sender("sender")
     ssn.open()
     snd.open()
 
-    self.expect(coll)
+    self.expect()
     self.pump()
-    self.expect(coll, Event.SESSION_REMOTE_STATE, Event.LINK_REMOTE_STATE)
+    self.expect(Event.SESSION_INIT, Event.SESSION_REMOTE_OPEN,
+                Event.LINK_INIT, Event.LINK_REMOTE_OPEN)
 
     c1.open()
     ssn2 = c1.session()
@@ -2121,61 +2144,308 @@ class EventTest(Test):
     rcv = ssn2.receiver("receiver")
     rcv.open()
     self.pump()
-    self.expect(coll,
-                Event.CONNECTION_LOCAL_STATE,
-                Event.TRANSPORT,
-                Event.SESSION_LOCAL_STATE,
-                Event.TRANSPORT,
-                Event.LINK_LOCAL_STATE,
+    self.expect(Event.CONNECTION_LOCAL_OPEN, Event.TRANSPORT,
+                Event.SESSION_INIT, Event.SESSION_LOCAL_OPEN,
+                Event.TRANSPORT, Event.LINK_INIT, Event.LINK_LOCAL_OPEN,
                 Event.TRANSPORT)
+
+    rcv.close()
+    self.expect(Event.LINK_LOCAL_CLOSE, Event.TRANSPORT)
+    self.pump()
+    rcv.free()
+    del rcv
+    self.expect(Event.LINK_FINAL)
+    ssn2.free()
+    del ssn2
+    self.pump()
+    c1.free()
+    c1.transport.unbind()
+    self.expect_oneof((Event.SESSION_FINAL, Event.LINK_FINAL, Event.SESSION_FINAL,
+                       Event.CONNECTION_UNBOUND, Event.CONNECTION_FINAL),
+                      (Event.CONNECTION_UNBOUND, Event.SESSION_FINAL, Event.LINK_FINAL,
+                       Event.SESSION_FINAL, Event.CONNECTION_FINAL))
+
+  def testConnectionINIT_FINAL(self):
+    c = Connection()
+    c.collect(self.collector)
+    self.expect(Event.CONNECTION_INIT)
+    c.free()
+    self.expect(Event.CONNECTION_FINAL)
+
+  def testSessionINIT_FINAL(self):
+    c = Connection()
+    c.collect(self.collector)
+    self.expect(Event.CONNECTION_INIT)
+    s = c.session()
+    self.expect(Event.SESSION_INIT)
+    s.free()
+    self.expect(Event.SESSION_FINAL)
+    c.free()
+    self.expect(Event.CONNECTION_FINAL)
+
+  def testLinkINIT_FINAL(self):
+    c = Connection()
+    c.collect(self.collector)
+    self.expect(Event.CONNECTION_INIT)
+    s = c.session()
+    self.expect(Event.SESSION_INIT)
+    r = s.receiver("asdf")
+    self.expect(Event.LINK_INIT)
+    r.free()
+    self.expect(Event.LINK_FINAL)
+    c.free()
+    self.expect(Event.SESSION_FINAL, Event.CONNECTION_FINAL)
 
   def testFlowEvents(self):
     snd, rcv = self.link("test-link")
-    coll = Collector()
-    snd.session.connection.collect(coll)
+    snd.session.connection.collect(self.collector)
     rcv.open()
     rcv.flow(10)
     self.pump()
-    self.expect(coll, Event.LINK_REMOTE_STATE, Event.LINK_FLOW)
+    self.expect(Event.CONNECTION_INIT, Event.SESSION_INIT,
+                Event.LINK_INIT, Event.LINK_REMOTE_OPEN, Event.LINK_FLOW)
     rcv.flow(10)
     self.pump()
-    self.expect(coll, Event.LINK_FLOW)
-    return snd, rcv, coll
+    self.expect(Event.LINK_FLOW)
+    return snd, rcv
 
   def testDeliveryEvents(self):
     snd, rcv = self.link("test-link")
-    coll = Collector()
-    rcv.session.connection.collect(coll)
+    rcv.session.connection.collect(self.collector)
     rcv.open()
     rcv.flow(10)
     self.pump()
-    self.expect(coll, Event.LINK_LOCAL_STATE, Event.TRANSPORT, Event.TRANSPORT)
+    self.expect(Event.CONNECTION_INIT, Event.SESSION_INIT,
+                Event.LINK_INIT, Event.LINK_LOCAL_OPEN, Event.TRANSPORT)
     snd.delivery("delivery")
     snd.send("Hello World!")
     snd.advance()
     self.pump()
-    self.expect(coll)
+    self.expect()
     snd.open()
     self.pump()
-    self.expect(coll, Event.LINK_REMOTE_STATE, Event.DELIVERY)
+    self.expect(Event.LINK_REMOTE_OPEN, Event.DELIVERY)
+    rcv.session.connection.transport.unbind()
+    rcv.session.connection.free()
+    self.expect(Event.CONNECTION_UNBOUND, Event.TRANSPORT, Event.LINK_FINAL,
+                Event.SESSION_FINAL, Event.CONNECTION_FINAL)
 
   def testDeliveryEventsDisp(self):
-    snd, rcv, coll = self.testFlowEvents()
+    snd, rcv = self.testFlowEvents()
     snd.open()
     dlv = snd.delivery("delivery")
     snd.send("Hello World!")
     assert snd.advance()
-    self.expect(coll,
-                Event.LINK_LOCAL_STATE,
-                Event.TRANSPORT,
-                Event.TRANSPORT,
-                Event.TRANSPORT)
+    self.expect(Event.LINK_LOCAL_OPEN, Event.TRANSPORT)
     self.pump()
-    self.expect(coll)
+    self.expect(Event.LINK_FLOW)
     rdlv = rcv.current
     assert rdlv != None
     assert rdlv.tag == "delivery"
     rdlv.update(Delivery.ACCEPTED)
     self.pump()
-    event = self.expect(coll, Event.DELIVERY)
-    assert event.delivery == dlv
+    event = self.expect(Event.DELIVERY)
+    assert event.context == dlv
+
+  def testConnectionBOUND_UNBOUND(self):
+    c = Connection()
+    c.collect(self.collector)
+    self.expect(Event.CONNECTION_INIT)
+    t = Transport()
+    t.bind(c)
+    self.expect(Event.CONNECTION_BOUND)
+    t.unbind()
+    self.expect(Event.CONNECTION_UNBOUND, Event.TRANSPORT)
+
+  def testTransportERROR_CLOSE(self):
+    c = Connection()
+    c.collect(self.collector)
+    self.expect(Event.CONNECTION_INIT)
+    t = Transport()
+    t.bind(c)
+    self.expect(Event.CONNECTION_BOUND)
+    assert t.condition is None
+    t.push("asdf")
+    self.expect(Event.TRANSPORT_ERROR, Event.TRANSPORT_TAIL_CLOSED)
+    assert t.condition is not None
+    assert t.condition.name == "amqp:connection:framing-error"
+    assert "AMQP header mismatch" in t.condition.description
+    p = t.pending()
+    assert p > 0
+    t.pop(p)
+    self.expect(Event.TRANSPORT_HEAD_CLOSED, Event.TRANSPORT_CLOSED)
+
+  def testTransportCLOSED(self):
+    c = Connection()
+    c.collect(self.collector)
+    self.expect(Event.CONNECTION_INIT)
+    t = Transport()
+    t.bind(c)
+    c.open()
+
+    self.expect(Event.CONNECTION_BOUND, Event.CONNECTION_LOCAL_OPEN, Event.TRANSPORT)
+
+    c2 = Connection()
+    t2 = Transport()
+    t2.bind(c2)
+    c2.open()
+    c2.close()
+
+    pump(t, t2)
+
+    self.expect(Event.CONNECTION_REMOTE_OPEN, Event.CONNECTION_REMOTE_CLOSE,
+                Event.TRANSPORT_TAIL_CLOSED)
+
+    c.close()
+
+    pump(t, t2)
+
+    self.expect(Event.CONNECTION_LOCAL_CLOSE, Event.TRANSPORT,
+                Event.TRANSPORT_HEAD_CLOSED, Event.TRANSPORT_CLOSED)
+
+  def testLinkDetach(self):
+    c1 = Connection()
+    c1.collect(self.collector)
+    t1 = Transport()
+    t1.bind(c1)
+    c1.open()
+    s1 = c1.session()
+    s1.open()
+    l1 = s1.sender("asdf")
+    l1.open()
+    l1.detach()
+    self.expect_until(Event.LINK_LOCAL_DETACH, Event.TRANSPORT)
+
+    c2 = Connection()
+    c2.collect(self.collector)
+    t2 = Transport()
+    t2.bind(c2)
+
+    pump(t1, t2)
+
+    self.expect_until(Event.LINK_REMOTE_DETACH)
+
+class PeerTest(CollectorTest):
+
+  def setup(self):
+    CollectorTest.setup(self)
+    self.connection = Connection()
+    self.connection.collect(self.collector)
+    self.transport = Transport()
+    self.transport.bind(self.connection)
+    self.peer = Connection()
+    self.peer_transport = Transport()
+    self.peer_transport.bind(self.peer)
+    self.peer_transport.trace(Transport.TRACE_OFF)
+
+  def pump(self):
+    pump(self.transport, self.peer_transport)
+
+class TeardownLeakTest(PeerTest):
+
+  def doLeak(self, local, remote):
+    self.connection.open()
+    self.expect(Event.CONNECTION_INIT, Event.CONNECTION_BOUND,
+                Event.CONNECTION_LOCAL_OPEN, Event.TRANSPORT)
+
+    ssn = self.connection.session()
+    ssn.open()
+    self.expect(Event.SESSION_INIT, Event.SESSION_LOCAL_OPEN, Event.TRANSPORT)
+
+    snd = ssn.sender("sender")
+    snd.open()
+    self.expect(Event.LINK_INIT, Event.LINK_LOCAL_OPEN, Event.TRANSPORT)
+
+
+    self.pump()
+
+    self.peer.open()
+    self.peer.session_head(0).open()
+    self.peer.link_head(0).open()
+
+    self.pump()
+    self.expect_oneof((Event.CONNECTION_REMOTE_OPEN, Event.SESSION_REMOTE_OPEN,
+                       Event.LINK_REMOTE_OPEN, Event.LINK_FLOW),
+                      (Event.CONNECTION_REMOTE_OPEN, Event.SESSION_REMOTE_OPEN,
+                       Event.LINK_REMOTE_OPEN))
+
+    if local:
+      snd.close() # ha!!
+      self.expect(Event.LINK_LOCAL_CLOSE, Event.TRANSPORT)
+    ssn.close()
+    self.expect(Event.SESSION_LOCAL_CLOSE, Event.TRANSPORT)
+    self.connection.close()
+    self.expect(Event.CONNECTION_LOCAL_CLOSE, Event.TRANSPORT)
+
+    if remote:
+      self.peer.link_head(0).close() # ha!!
+    self.peer.session_head(0).close()
+    self.peer.close()
+
+    self.pump()
+
+    if remote:
+      self.expect(Event.TRANSPORT_HEAD_CLOSED, Event.LINK_REMOTE_CLOSE,
+                  Event.SESSION_REMOTE_CLOSE, Event.CONNECTION_REMOTE_CLOSE,
+                  Event.TRANSPORT_TAIL_CLOSED, Event.TRANSPORT_CLOSED)
+    else:
+      self.expect(Event.TRANSPORT_HEAD_CLOSED, Event.SESSION_REMOTE_CLOSE,
+                  Event.CONNECTION_REMOTE_CLOSE, Event.TRANSPORT_TAIL_CLOSED,
+                  Event.TRANSPORT_CLOSED)
+
+    self.connection.free()
+    self.transport.unbind()
+
+    self.expect(Event.LINK_FINAL, Event.SESSION_FINAL, Event.CONNECTION_UNBOUND, Event.CONNECTION_FINAL)
+
+  def testLocalRemoteLeak(self):
+    self.doLeak(True, True)
+
+  def testLocalLeak(self):
+    self.doLeak(True, False)
+
+  def testRemoteLeak(self):
+    self.doLeak(False, True)
+
+  def testLeak(self):
+    self.doLeak(False, False)
+
+class IdleTimeoutEventTest(PeerTest):
+
+  def half_pump(self):
+    p = self.transport.pending()
+    self.transport.pop(p)
+
+  def testTimeoutWithZombieServer(self):
+    self.transport.idle_timeout = self.delay
+    self.connection.open()
+    self.half_pump()
+    self.transport.tick(time())
+    sleep(self.delay*2)
+    self.transport.tick(time())
+    self.expect(Event.CONNECTION_INIT, Event.CONNECTION_BOUND,
+                Event.CONNECTION_LOCAL_OPEN, Event.TRANSPORT,
+                Event.TRANSPORT_ERROR, Event.TRANSPORT_TAIL_CLOSED)
+    assert self.transport.capacity() < 0
+    assert self.transport.pending() > 0
+    self.half_pump()
+    self.expect(Event.TRANSPORT_HEAD_CLOSED, Event.TRANSPORT_CLOSED)
+    assert self.transport.pending() < 0
+
+  def testTimeoutWithZombieServerAndSASL(self):
+    sasl = self.transport.sasl()
+    self.testTimeoutWithZombieServer()
+
+class DeliverySegFaultTest(Test):
+
+  def testDeliveryAfterUnbind(self):
+    conn = Connection()
+    t = Transport()
+    ssn = conn.session()
+    snd = ssn.sender("sender")
+    dlv = snd.delivery("tag")
+    dlv.settle()
+    del dlv
+    t.bind(conn)
+    t.unbind()
+    dlv = snd.delivery("tag")

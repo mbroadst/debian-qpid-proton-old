@@ -23,6 +23,11 @@ exposed to python via swig. This allows tests defined in python to run
 against both the C and Java protocol implementations.
 """
 
+# @todo(kgiusti) dynamically set these via filters in the pom.xml file
+PN_VERSION_MAJOR = 0
+PN_VERSION_MINOR = 0
+
+from cobject import *
 from cerror import *
 from ccodec import *
 from cengine import *
@@ -31,3 +36,20 @@ from cssl import *
 from cdriver import *
 from cmessenger import *
 from cmessage import *
+from curl import *
+from creactor import *
+from chandlers import *
+
+# XXX: this is for compatibility, apparently the version of jython we
+# use doesn't have next, we should remove this when we upgrade
+
+_DEF = object()
+
+def next(iter, default=_DEF):
+    try:
+        return iter.next()
+    except StopIteration:
+        if default is _DEF:
+            raise
+        else:
+            return default

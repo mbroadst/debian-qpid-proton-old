@@ -53,14 +53,18 @@ public abstract class LinkImpl extends EndpointImpl implements Link
     private ReceiverSettleMode _remoteReceiverSettleMode;
 
 
-    private final LinkNode<LinkImpl> _node;
+    private LinkNode<LinkImpl> _node;
     private boolean _drain;
+    private boolean _detached;
 
     LinkImpl(SessionImpl session, String name)
     {
         _session = session;
+        _session.incref();
         _name = name;
-        _node = session.getConnectionImpl().addLinkEndpoint(this);
+        ConnectionImpl conn = session.getConnectionImpl();
+        _node = conn.addLinkEndpoint(this);
+        conn.put(Event.Type.LINK_INIT, this);
     }
 
 
@@ -103,11 +107,27 @@ public abstract class LinkImpl extends EndpointImpl implements Link
         }
     }
 
-    public void free()
+    @Override
+    void postFinal() {
+        _session.getConnectionImpl().put(Event.Type.LINK_FINAL, this);
+        _session.decref();
+    }
+
+    @Override
+    void doFree()
     {
-        super.free();
+        DeliveryImpl dlv = _head;
+        while (dlv != null) {
+            dlv.free();
+            dlv = dlv.next();
+        }
+
         _session.getConnectionImpl().removeLinkEndpoint(_node);
-        //TODO.
+        _node = null;
+    }
+
+    void modifyEndpoints() {
+        modified();
     }
 
     public void remove(DeliveryImpl delivery)
@@ -375,11 +395,27 @@ public abstract class LinkImpl extends EndpointImpl implements Link
     }
 
     @Override
-    protected void localStateChanged()
+    void localOpen()
     {
-        EventImpl ev = getConnectionImpl().put(Event.Type.LINK_LOCAL_STATE);
-        if (ev != null) {
-            ev.init(this);
-        }
+        getConnectionImpl().put(Event.Type.LINK_LOCAL_OPEN, this);
     }
+
+    @Override
+    void localClose()
+    {
+        getConnectionImpl().put(Event.Type.LINK_LOCAL_CLOSE, this);
+    }
+
+    public void detach()
+    {
+        _detached = true;
+        getConnectionImpl().put(Event.Type.LINK_LOCAL_DETACH, this);
+        modified();
+    }
+
+    boolean detached()
+    {
+        return _detached;
+    }
+
 }

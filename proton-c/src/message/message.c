@@ -29,8 +29,8 @@
 #include <stdio.h>
 #include <assert.h>
 #include "protocol.h"
-#include "../util.h"
-#include "../platform_fmt.h"
+#include "util.h"
+#include "platform_fmt.h"
 
 ssize_t pn_message_data(char *dst, size_t available, const char *src, size_t size)
 {
@@ -49,11 +49,8 @@ ssize_t pn_message_data(char *dst, size_t available, const char *src, size_t siz
 // message
 
 struct pn_message_t {
-  bool durable;
-  uint8_t priority;
-  pn_millis_t ttl;
-  bool first_acquirer;
-  uint32_t delivery_count;
+  pn_timestamp_t expiry_time;
+  pn_timestamp_t creation_time;
   pn_data_t *id;
   pn_string_t *user_id;
   pn_string_t *address;
@@ -62,22 +59,27 @@ struct pn_message_t {
   pn_data_t *correlation_id;
   pn_string_t *content_type;
   pn_string_t *content_encoding;
-  pn_timestamp_t expiry_time;
-  pn_timestamp_t creation_time;
   pn_string_t *group_id;
-  pn_sequence_t group_sequence;
   pn_string_t *reply_to_group_id;
 
-  bool inferred;
   pn_data_t *data;
   pn_data_t *instructions;
   pn_data_t *annotations;
   pn_data_t *properties;
   pn_data_t *body;
 
-  pn_format_t format;
   pn_parser_t *parser;
   pn_error_t *error;
+
+  pn_sequence_t group_sequence;
+  pn_millis_t ttl;
+  uint32_t delivery_count;
+
+  uint8_t priority;
+
+  bool durable;
+  bool first_acquirer;
+  bool inferred;
 };
 
 void pn_message_finalize(void *obj)
@@ -318,8 +320,8 @@ int pn_message_inspect(void *obj, pn_string_t *dst)
 
 pn_message_t *pn_message()
 {
-  static pn_class_t clazz = PN_CLASS(pn_message);
-  pn_message_t *msg = (pn_message_t *) pn_new(sizeof(pn_message_t), &clazz);
+  static const pn_class_t clazz = PN_CLASS(pn_message);
+  pn_message_t *msg = (pn_message_t *) pn_class_new(&clazz, sizeof(pn_message_t));
   msg->durable = false;
   msg->priority = PN_DEFAULT_PRIORITY;
   msg->ttl = 0;
@@ -346,7 +348,6 @@ pn_message_t *pn_message()
   msg->properties = pn_data(16);
   msg->body = pn_data(16);
 
-  msg->format = PN_DATA;
   msg->parser = NULL;
   msg->error = pn_error();
   return msg;
@@ -860,184 +861,6 @@ int pn_message_encode(pn_message_t *msg, char *bytes, size_t *size)
   pn_data_clear(msg->data);
 
   return 0;
-}
-
-pn_format_t pn_message_get_format(pn_message_t *msg)
-{
-  return msg ? msg->format : PN_AMQP;
-}
-
-int pn_message_set_format(pn_message_t *msg, pn_format_t format)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  msg->format = format;
-  return 0;
-}
-
-int pn_message_load(pn_message_t *msg, const char *data, size_t size)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  switch (msg->format) {
-  case PN_DATA: return pn_message_load_data(msg, data, size);
-  case PN_TEXT: return pn_message_load_text(msg, data, size);
-  case PN_AMQP: return pn_message_load_amqp(msg, data, size);
-  case PN_JSON: return pn_message_load_json(msg, data, size);
-  }
-
-  return PN_STATE_ERR;
-}
-
-int pn_message_load_data(pn_message_t *msg, const char *data, size_t size)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  pn_data_clear(msg->body);
-  int err = pn_data_fill(msg->body, "z", size, data);
-  if (err) {
-    return pn_error_format(msg->error, err, "data error: %s",
-                           pn_data_error(msg->body));
-  } else {
-    return 0;
-  }
-}
-
-int pn_message_load_text(pn_message_t *msg, const char *data, size_t size)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  pn_data_clear(msg->body);
-  int err = pn_data_fill(msg->body, "S", data);
-  if (err) {
-    return pn_error_format(msg->error, err, "data error: %s",
-                           pn_data_error(msg->body));
-  } else {
-    return 0;
-  }
-}
-
-int pn_message_load_amqp(pn_message_t *msg, const char *data, size_t size)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  pn_parser_t *parser = pn_message_parser(msg);
-
-  pn_data_clear(msg->body);
-  int err = pn_parser_parse(parser, data, msg->body);
-  if (err) {
-    return pn_error_format(msg->error, err, "parse error: %s",
-                           pn_parser_error(parser));
-  } else {
-    return 0;
-  }
-}
-
-int pn_message_load_json(pn_message_t *msg, const char *data, size_t size)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  // XXX: unsupported format
-
-  return PN_ERR;
-}
-
-int pn_message_save(pn_message_t *msg, char *data, size_t *size)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  switch (msg->format) {
-  case PN_DATA: return pn_message_save_data(msg, data, size);
-  case PN_TEXT: return pn_message_save_text(msg, data, size);
-  case PN_AMQP: return pn_message_save_amqp(msg, data, size);
-  case PN_JSON: return pn_message_save_json(msg, data, size);
-  }
-
-  return PN_STATE_ERR;
-}
-
-int pn_message_save_data(pn_message_t *msg, char *data, size_t *size)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  if (!msg->body || pn_data_size(msg->body) == 0) {
-    *size = 0;
-    return 0;
-  }
-
-  bool scanned;
-  pn_bytes_t bytes;
-  int err = pn_data_scan(msg->body, "?z", &scanned, &bytes);
-  if (err) return pn_error_format(msg->error, err, "data error: %s",
-                                  pn_data_error(msg->body));
-  if (scanned) {
-    if (bytes.size > *size) {
-      return PN_OVERFLOW;
-    } else {
-      memcpy(data, bytes.start, bytes.size);
-      *size = bytes.size;
-      return 0;
-    }
-  } else {
-    return PN_STATE_ERR;
-  }
-}
-
-int pn_message_save_text(pn_message_t *msg, char *data, size_t *size)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  pn_data_rewind(msg->body);
-  if (pn_data_next(msg->body)) {
-    switch (pn_data_type(msg->body)) {
-    case PN_STRING:
-      {
-        pn_bytes_t str = pn_data_get_bytes(msg->body);
-        if (str.size >= *size) {
-          return PN_OVERFLOW;
-        } else {
-          memcpy(data, str.start, str.size);
-          data[str.size] = '\0';
-          *size = str.size;
-          return 0;
-        }
-      }
-      break;
-    case PN_NULL:
-      *size = 0;
-      return 0;
-    default:
-      return PN_STATE_ERR;
-    }
-  } else {
-    *size = 0;
-    return 0;
-  }
-}
-
-int pn_message_save_amqp(pn_message_t *msg, char *data, size_t *size)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  if (!msg->body) {
-    *size = 0;
-    return 0;
-  }
-
-  int err = pn_data_format(msg->body, data, size);
-  if (err) return pn_error_format(msg->error, err, "data error: %s",
-                                  pn_data_error(msg->body));
-
-  return 0;
-}
-
-int pn_message_save_json(pn_message_t *msg, char *data, size_t *size)
-{
-  if (!msg) return PN_ARG_ERR;
-
-  // XXX: unsupported format
-
-  return PN_ERR;
 }
 
 pn_data_t *pn_message_instructions(pn_message_t *msg)

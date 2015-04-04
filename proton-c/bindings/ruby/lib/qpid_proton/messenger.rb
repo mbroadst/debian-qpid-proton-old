@@ -17,9 +17,9 @@
 # under the License.
 #
 
-module Qpid
+module Qpid # :nodoc:
 
-  module Proton
+  module Proton # :nodoc:
 
     # The +Messenger+ class defines a high level interface for
     # sending and receiving Messages. Every Messenger contains
@@ -36,19 +36,19 @@ module Qpid
     #
     # The Messenger class works in conjuction with the Message class. The
     # Message class is a mutable holder of message content.
-    # 
-    # The put method copies its Message to the outgoing queue, and may 
+    #
+    # The put method copies its Message to the outgoing queue, and may
     # send queued messages if it can do so without blocking.  The send
     # method blocks until it has sent the requested number of messages,
     # or until a timeout interrupts the attempt.
-    # 
+    #
     # Similarly, the recv method receives messages into the incoming
     # queue, and may block as it attempts to receive the requested number
     # of messages,  or until timeout is reached. It may receive fewer
     # than the requested number.  The get method pops the
     # eldest Message off the incoming queue and copies it into the Message
     # object that you supply.  It will not block.
-    # 
+    #
     # The blocking attribute allows you to turn off blocking behavior entirely,
     # in which case send and recv will do whatever they can without
     # blocking, and then return.  You can then look at the number
@@ -58,6 +58,11 @@ module Qpid
     class Messenger
 
       include Qpid::Proton::ExceptionHandling
+
+      can_raise_exception [:send, :receive, :password=, :start, :stop,
+                           :perform_put, :perform_get, :interrupt,
+                           :route, :rewrite, :accept, :reject,
+                           :incoming_window=, :outgoing_window=]
 
       # Creates a new +Messenger+.
       #
@@ -70,6 +75,7 @@ module Qpid
       #
       def initialize(name = nil)
         @impl = Cproton.pn_messenger(name)
+        @selectables = {}
         ObjectSpace.define_finalizer(self, self.class.finalize!(@impl))
       end
 
@@ -93,7 +99,7 @@ module Qpid
       # * password - the password
       #
       def password=(password)
-        check_for_error(Cproton.pn_messenger_set_password(@impl, password))
+        Cproton.pn_messenger_set_password(@impl, password)
       end
 
       # Returns the password property for the Messenger.private_key file.
@@ -136,6 +142,30 @@ module Qpid
         Cproton.pn_messenger_set_blocking(@impl, blocking)
       end
 
+      # Returns true if passive mode is enabled.
+      #
+      def passive?
+        Cproton.pn_messenger_is_passive(@impl)
+      end
+
+      # Turns passive mode on or off.
+      #
+      # When set to passive mode, Messenger will not attempt to perform I/O
+      # operations internally. In this mode it is necesssary to use the
+      # Selectable type to drive any I/O needed to perform requestioned
+      # actions.
+      #
+      # In this mode Messenger will never block.
+      #
+      def passive=(mode)
+        Cproton.pn_messenger_set_passive(@impl, mode)
+      end
+
+      def deadline
+        tstamp = Cproton.pn_messenger_deadline(@impl)
+        return tstamp / 1000.0 unless tstamp.nil?
+      end
+
       # Reports whether an error occurred.
       #
       def error?
@@ -154,25 +184,34 @@ module Qpid
         Cproton.pn_error_text(Cproton.pn_messenger_error(@impl))
       end
 
+      # Clears the current error state.
+      #
+      def clear_error
+        error = Cproton.pn_messenger_error(@impl)
+        unless error.nil?
+          Cproton.pn_error_clear(error)
+        end
+      end
+
       # Currently a no-op placeholder.
       # For future compatibility, do not send or recv messages
       # before starting the +Messenger+.
       #
       def start
-        check_for_error(Cproton.pn_messenger_start(@impl))
+        Cproton.pn_messenger_start(@impl)
       end
 
       # Stops the +Messenger+, preventing it from sending or receiving
       # any more messages.
       #
       def stop
-        check_for_error(Cproton.pn_messenger_stop(@impl))
+        Cproton.pn_messenger_stop(@impl)
       end
 
-      # Returns true iff a Messenger is in the stopped state.
+      # Returns true if a Messenger is in the stopped state.
       # This function does not block.
       #
-      def stopped
+      def stopped?
         Cproton.pn_messenger_stopped(@impl)
       end
 
@@ -182,13 +221,19 @@ module Qpid
       # domain portion of the address begins with the '~' character, the
       # Messenger will interpret the domain as host/port, bind to it,
       # and listen for incoming messages. For example "~0.0.0.0",
-      # "amqp://~0.0.0.0" will all bind to any local interface and 
-      # listen for incoming messages.  Ad address of # "amqps://~0.0.0.0" 
+      # "amqp://~0.0.0.0" will all bind to any local interface and
+      # listen for incoming messages.  An address of "amqps://~0.0.0.0"
       # will only permit incoming SSL connections.
       #
-      def subscribe(address)
+      # ==== Options
+      #
+      # * address - the source address to be subscribe
+      # * timeout - an optional time-to-live value, in seconds, for the
+      #             subscription
+      #
+      def subscribe(address, timeout=0)
         raise TypeError.new("invalid address: #{address}") if address.nil?
-        subscription = Cproton.pn_messenger_subscribe(@impl, address)
+        subscription = Cproton.pn_messenger_subscribe_ttl(@impl, address, timeout)
         raise Qpid::Proton::ProtonError.new("Subscribe failed") if subscription.nil?
         Qpid::Proton::Subscription.new(subscription)
       end
@@ -257,10 +302,10 @@ module Qpid
       # Places the content contained in the message onto the outgoing
       # queue of the Messenger.
       #
-      # This method will never block, however it will send any unblocked 
+      # This method will never block, however it will send any unblocked
       # Messages in the outgoing queue immediately and leave any blocked
       # Messages remaining in the outgoing queue.
-      # The send call may then be used to block until the outgoing queue 
+      # The send call may then be used to block until the outgoing queue
       # is empty.  The outgoing attribute may be used to check the depth
       # of the outgoing queue.
       #
@@ -273,18 +318,27 @@ module Qpid
         raise ArgumentError.new("invalid message type: #{message.class}") unless message.kind_of?(Message)
         # encode the message first
         message.pre_encode
-        check_for_error(Cproton.pn_messenger_put(@impl, message.impl))
+        perform_put(message)
         return outgoing_tracker
       end
 
+      private
+
+      def perform_put(message) # :nodoc:
+        Cproton.pn_messenger_put(@impl, message.impl)
+      end
+
+      public
+
+
       # This call will block until the indicated number of messages
       # have been sent, or until the operation times out.
-      # If n is -1 this call will block until all outgoing messages 
-      # have been sent. If n is 0 then this call will send whatever 
+      # If n is -1 this call will block until all outgoing messages
+      # have been sent. If n is 0 then this call will send whatever
       # it can without blocking.
       #
       def send(n = -1)
-        check_for_error(Cproton.pn_messenger_send(@impl, n))
+        Cproton.pn_messenger_send(@impl, n)
       end
 
       # Moves the message from the head of the incoming message queue into
@@ -308,10 +362,18 @@ module Qpid
         else
           msg_impl = msg.impl
         end
-        check_for_error(Cproton.pn_messenger_get(@impl, msg_impl))
+        perform_get(msg_impl)
         msg.post_decode unless msg.nil?
         return incoming_tracker
       end
+
+      private
+
+      def perform_get(msg) # :nodoc:
+        Cproton.pn_messenger_get(@impl, msg)
+      end
+
+      public
 
       # Receives up to limit messages into the incoming queue.  If no value
       # for limit is supplied, this call will receive as many messages as it
@@ -324,10 +386,11 @@ module Qpid
       # * limit - the maximum number of messages to receive
       #
       def receive(limit = -1)
-        check_for_error(Cproton.pn_messenger_recv(@impl, limit))
+        Cproton.pn_messenger_recv(@impl, limit)
       end
 
-      def receiving
+      # Returns true if the messenger is currently receiving data.
+      def receiving?
         Cproton.pn_messenger_receiving(@impl)
       end
 
@@ -344,7 +407,7 @@ module Qpid
       # originated the interrupt.
       #
       def interrupt
-        check_for_error(Cproton.pn_messenger_interrupt(@impl))
+        Cproton.pn_messenger_interrupt(@impl)
       end
 
       # Sends or receives any outstanding messages queued for a Messenger.
@@ -352,7 +415,7 @@ module Qpid
       # This will block for the indicated timeout.  This method may also do I/O
       # other than sending and receiving messages.  For example, closing
       # connections after stop() has been called.
-      # 
+      #
       def work(timeout=-1)
         err = Cproton.pn_messenger_work(@impl, timeout)
         if (err == Cproton::PN_TIMEOUT) then
@@ -432,7 +495,7 @@ module Qpid
       #   messenger.route("*", "amqp://user:password@broker/$1")
       #
       def route(pattern, address)
-        check_for_error(Cproton.pn_messenger_route(@impl, pattern, address))
+        Cproton.pn_messenger_route(@impl, pattern, address)
       end
 
       # Similar to #route, except that the destination of
@@ -454,7 +517,23 @@ module Qpid
       # * address - the target address
       #
       def rewrite(pattern, address)
-        check_for_error(Cproton.pn_messenger_rewrite(@impl, pattern, address))
+        Cproton.pn_messenger_rewrite(@impl, pattern, address)
+      end
+
+      def selectable
+        impl = Cproton.pn_messenger_selectable(@impl)
+
+        # if we don't have any selectables, then return
+        return nil if impl.nil?
+
+        fd = Cproton.pn_selectable_fd(impl)
+
+        selectable = @selectables[fd]
+        if selectable.nil?
+          selectable = Selectable.new(self, impl)
+          @selectables[fd] = selectable
+        end
+        return selectable
       end
 
       # Returns a +Tracker+ for the message most recently sent via the put
@@ -492,7 +571,7 @@ module Qpid
         else
           flag = 0
         end
-        check_for_error(Cproton.pn_messenger_accept(@impl, tracker.impl, flag))
+        Cproton.pn_messenger_accept(@impl, tracker.impl, flag)
       end
 
       # Rejects the incoming message identified by the tracker.
@@ -512,13 +591,13 @@ module Qpid
         else
           flag = 0
         end
-        check_for_error(Cproton.pn_messenger_reject(@impl, tracker.impl, flag))
+        Cproton.pn_messenger_reject(@impl, tracker.impl, flag)
       end
 
       # Gets the last known remote state of the delivery associated with
-      # the given tracker, as long as the Message is still within your 
-      # outgoing window. (Also works on incoming messages that are still 
-      # within your incoming queue. See TrackerStatus for details on the 
+      # the given tracker, as long as the Message is still within your
+      # outgoing window. (Also works on incoming messages that are still
+      # within your incoming queue. See TrackerStatus for details on the
       # values returned.
       #
       # ==== Options
@@ -553,13 +632,13 @@ module Qpid
 
       # Sets the incoming window.
       #
-      # The Messenger will track the remote status of this many incoming 
+      # The Messenger will track the remote status of this many incoming
       # deliveries after they have been accepted or rejected.
       #
       # Messages enter this window only when you take them into your application
       # using get().  If your incoming window size is n, and you get n+1 messages
       # without explicitly accepting or rejecting the oldest message, then the
-      # message that passes beyond the edge of the incoming window will be 
+      # message that passes beyond the edge of the incoming window will be
       # assigned the default disposition of its link.
       #
       # ==== Options
@@ -568,7 +647,7 @@ module Qpid
       #
       def incoming_window=(window)
         raise TypeError.new("invalid window: #{window}") unless valid_window?(window)
-        check_for_error(Cproton.pn_messenger_set_incoming_window(@impl, window))
+        Cproton.pn_messenger_set_incoming_window(@impl, window)
       end
 
       # Returns the incoming window.
@@ -579,7 +658,7 @@ module Qpid
 
       # Sets the outgoing window.
       #
-      # The Messenger will track the remote status of this many outgoing 
+      # The Messenger will track the remote status of this many outgoing
       # deliveries after calling send.
       # A Message enters this window when you call the put() method with the
       # message.  If your outgoing window size is n, and you call put n+1
@@ -592,13 +671,18 @@ module Qpid
       #
       def outgoing_window=(window)
         raise TypeError.new("invalid window: #{window}") unless valid_window?(window)
-        check_for_error(Cproton.pn_messenger_set_outgoing_window(@impl, window))
+        Cproton.pn_messenger_set_outgoing_window(@impl, window)
       end
 
       # Returns the outgoing window.
       #
       def outgoing_window
         Cproton.pn_messenger_get_outgoing_window(@impl)
+      end
+
+      # Unregisters a selectable object.
+      def unregister_selectable(fileno) # :nodoc:
+        @selectables.delete(fileno)
       end
 
       private

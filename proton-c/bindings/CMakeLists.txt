@@ -20,7 +20,18 @@
 include(UseSWIG)
 
 # Add any new bindings here - the directory name must be the same as the binding name
-set (BINDINGS python ruby php perl)
+set (BINDINGS python ruby php perl javascript)
+
+# All swig modules should include ${PROTON_HEADERS} in SWIG_MODULE_<name>_EXTRA_DEPS
+file(GLOB PROTON_HEADERS "${CMAKE_SOURCE_DIR}/proton-c/include/proton/*.h")
+
+# If swig version is 3.0 or greater then we can build some additional bindings
+if (${SWIG_VERSION} VERSION_GREATER 3.0 OR ${SWIG_VERSION} VERSION_EQUAL 3.0)
+  set (BINDINGS
+    ${BINDINGS}
+    node
+    )
+endif()
 
 set (BINDING_DEPS qpid-proton)
 
@@ -62,7 +73,9 @@ if (RUBY_FOUND)
   if (HAS_RUBY_GEM_RSPEC AND HAS_RUBY_GEM_SIMPLECOV)
     set (DEFAULT_RUBY_TESTING ON CACHE INTERNAL "")
   else()
+    message(STATUS "Skipping Ruby bindings due to missing dependencies...")
     set (DEFAULT_RUBY_TESTING OFF CACHE INTERNAL "")
+    set (DEFAULT_RUBY OFF)
   endif (HAS_RUBY_GEM_RSPEC AND HAS_RUBY_GEM_SIMPLECOV)
 endif (RUBY_FOUND)
 
@@ -80,11 +93,20 @@ endif (PHP_CONFIG_EXE)
 mark_as_advanced (PHP_CONFIG_EXE)
 
 # Prerequisites for Perl:
-include(FindPerl)
-include(FindPerlLibs)
+include(ProtonFindPerl)
 if (PERLLIBS_FOUND)
   set (DEFAULT_PERL ON)
 endif (PERLLIBS_FOUND)
+
+# Prerequisites for the javascript "binding":
+# This is somewhat different to the other language bindings in that it does not use swig. It uses a C/C++ to
+# JavaScript cross-compiler called emscripten (https://github.com/kripken/emscripten). Emscripten takes C/C++
+# and compiles it into a highly optimisable subset of JavaScript called asm.js (http://asmjs.org/) that can be
+# aggressively optimised and run at near-native speed (usually between 1.5 to 10 times slower than native C/C++).
+find_package(Emscripten)
+if (EMSCRIPTEN_FOUND)
+  set (DEFAULT_JAVASCRIPT ON)
+endif (EMSCRIPTEN_FOUND)
 
 # Shouldn't need to modify below here when adding new language binding
 foreach(BINDING ${BINDINGS})

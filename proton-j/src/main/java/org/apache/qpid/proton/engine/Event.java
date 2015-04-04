@@ -28,39 +28,62 @@ package org.apache.qpid.proton.engine;
 
 public interface Event
 {
-    public enum Category {
-        PROTOCOL;
-    }
 
     public enum Type {
-        CONNECTION_REMOTE_STATE(Category.PROTOCOL, 1),
-        CONNECTION_LOCAL_STATE(Category.PROTOCOL, 2),
-        SESSION_REMOTE_STATE(Category.PROTOCOL, 3),
-        SESSION_LOCAL_STATE(Category.PROTOCOL, 4),
-        LINK_REMOTE_STATE(Category.PROTOCOL, 5),
-        LINK_LOCAL_STATE(Category.PROTOCOL, 6),
-        LINK_FLOW(Category.PROTOCOL, 7),
-        DELIVERY(Category.PROTOCOL, 8),
-        TRANSPORT(Category.PROTOCOL, 9);
+        REACTOR_INIT,
+        REACTOR_QUIESCED,
+        REACTOR_FINAL,
 
-        private int _opcode;
-        private Category _category;
+        TIMER_TASK,
 
-        private Type(Category c, int o)
-        {
-            this._category = c;
-            this._opcode = o;
-        }
+        CONNECTION_INIT,
+        CONNECTION_BOUND,
+        CONNECTION_UNBOUND,
+        CONNECTION_LOCAL_OPEN,
+        CONNECTION_REMOTE_OPEN,
+        CONNECTION_LOCAL_CLOSE,
+        CONNECTION_REMOTE_CLOSE,
+        CONNECTION_FINAL,
 
-        public Category getCategory()
-        {
-            return this._category;
-        }
+        SESSION_INIT,
+        SESSION_LOCAL_OPEN,
+        SESSION_REMOTE_OPEN,
+        SESSION_LOCAL_CLOSE,
+        SESSION_REMOTE_CLOSE,
+        SESSION_FINAL,
+
+        LINK_INIT,
+        LINK_LOCAL_OPEN,
+        LINK_REMOTE_OPEN,
+        LINK_LOCAL_DETACH,
+        LINK_REMOTE_DETACH,
+        LINK_LOCAL_CLOSE,
+        LINK_REMOTE_CLOSE,
+        LINK_FLOW,
+        LINK_FINAL,
+
+        DELIVERY,
+
+        TRANSPORT,
+        TRANSPORT_ERROR,
+        TRANSPORT_HEAD_CLOSED,
+        TRANSPORT_TAIL_CLOSED,
+        TRANSPORT_CLOSED,
+
+        SELECTABLE_INIT,
+        SELECTABLE_UPDATED,
+        SELECTABLE_READABLE,
+        SELECTABLE_WRITABLE,
+        SELECTABLE_EXPIRED,
+        SELECTABLE_ERROR,
+        SELECTABLE_FINAL
     }
 
-    Category getCategory();
-
     Type getType();
+
+    Object getContext();
+
+    void dispatch(Handler handler);
 
     Connection getConnection();
 
@@ -71,5 +94,7 @@ public interface Event
     Delivery getDelivery();
 
     Transport getTransport();
+
+    Event copy();
 
 }

@@ -24,6 +24,7 @@
 
 #include <proton/import_export.h>
 #include <proton/type_compat.h>
+#include <proton/object.h>
 #include <stddef.h>
 #include <sys/types.h>
 
@@ -77,15 +78,6 @@ extern "C" {
 typedef struct pn_event_t pn_event_t;
 
 /**
- * Related events are grouped into categories
- */
-typedef enum {
-    PN_EVENT_CATEGORY_NONE   = 0,
-    PN_EVENT_CATEGORY_PROTOCOL = 0x00010000,
-    PN_EVENT_CATEGORY_COUNT = 2
-} pn_event_category_t;
-
-/**
  * An event type.
  */
 typedef enum {
@@ -94,45 +86,217 @@ typedef enum {
    * ever be generated.
    */
   PN_EVENT_NONE = 0,
+
   /**
-   * The endpoint state flags for a connection have changed. Events of
-   * this type point to the relevant connection as well as its
-   * associated transport.
+   * A reactor has been started. Events of this type point to the reactor.
    */
-  PN_CONNECTION_REMOTE_STATE = PN_EVENT_CATEGORY_PROTOCOL+1,
-  PN_CONNECTION_LOCAL_STATE = PN_EVENT_CATEGORY_PROTOCOL+2,
+  PN_REACTOR_INIT,
+
   /**
-   * The endpoint state flags for a session have changed. Events of
-   * this type point to the relevant session as well as its associated
-   * connection and transport.
+   * A reactor has no more events to process. Events of this type
+   * point to the reactor.
    */
-  PN_SESSION_REMOTE_STATE = PN_EVENT_CATEGORY_PROTOCOL+3,
-  PN_SESSION_LOCAL_STATE = PN_EVENT_CATEGORY_PROTOCOL+4,
+  PN_REACTOR_QUIESCED,
+
   /**
-   * The endpoint state flags for a link have changed. Events of this
-   * type point to the relevant link as well as its associated
-   * session, connection, and transport.
+   * A reactor has been stopped. Events of this type point to the reactor.
    */
-  PN_LINK_REMOTE_STATE = PN_EVENT_CATEGORY_PROTOCOL+5,
-  PN_LINK_LOCAL_STATE = PN_EVENT_CATEGORY_PROTOCOL+6,
+  PN_REACTOR_FINAL,
+
+  /**
+   * A timer event has occurred.
+   */
+  PN_TIMER_TASK,
+
+  /**
+   * The connection has been created. This is the first event that
+   * will ever be issued for a connection. Events of this type point
+   * to the relevant connection.
+   */
+  PN_CONNECTION_INIT,
+
+  /**
+   * The connection has been bound to a transport. This event is
+   * issued when the ::pn_transport_bind() operation is invoked.
+   */
+  PN_CONNECTION_BOUND,
+
+  /**
+   * The connection has been unbound from its transport. This event is
+   * issued when the ::pn_transport_unbind() operation is invoked.
+   */
+  PN_CONNECTION_UNBOUND,
+
+  /**
+   * The local connection endpoint has been closed. Events of this
+   * type point to the relevant connection.
+   */
+  PN_CONNECTION_LOCAL_OPEN,
+
+  /**
+   * The remote endpoint has opened the connection. Events of this
+   * type point to the relevant connection.
+   */
+  PN_CONNECTION_REMOTE_OPEN,
+
+  /**
+   * The local connection endpoint has been closed. Events of this
+   * type point to the relevant connection.
+   */
+  PN_CONNECTION_LOCAL_CLOSE,
+
+  /**
+   *  The remote endpoint has closed the connection. Events of this
+   *  type point to the relevant connection.
+   */
+  PN_CONNECTION_REMOTE_CLOSE,
+
+  /**
+   * The connection has been freed and any outstanding processing has
+   * been completed. This is the final event that will ever be issued
+   * for a connection.
+   */
+  PN_CONNECTION_FINAL,
+
+  /**
+   * The session has been created. This is the first event that will
+   * ever be issued for a session.
+   */
+  PN_SESSION_INIT,
+
+  /**
+   * The local session endpoint has been opened. Events of this type
+   * point ot the relevant session.
+   */
+  PN_SESSION_LOCAL_OPEN,
+
+  /**
+   * The remote endpoint has opened the session. Events of this type
+   * point to the relevant session.
+   */
+  PN_SESSION_REMOTE_OPEN,
+
+  /**
+   * The local session endpoint has been closed. Events of this type
+   * point ot the relevant session.
+   */
+  PN_SESSION_LOCAL_CLOSE,
+
+  /**
+   * The remote endpoint has closed the session. Events of this type
+   * point to the relevant session.
+   */
+  PN_SESSION_REMOTE_CLOSE,
+
+  /**
+   * The session has been freed and any outstanding processing has
+   * been completed. This is the final event that will ever be issued
+   * for a session.
+   */
+  PN_SESSION_FINAL,
+
+  /**
+   * The link has been created. This is the first event that will ever
+   * be issued for a link.
+   */
+  PN_LINK_INIT,
+
+  /**
+   * The local link endpoint has been opened. Events of this type
+   * point ot the relevant link.
+   */
+  PN_LINK_LOCAL_OPEN,
+
+  /**
+   * The remote endpoint has opened the link. Events of this type
+   * point to the relevant link.
+   */
+  PN_LINK_REMOTE_OPEN,
+
+  /**
+   * The local link endpoint has been closed. Events of this type
+   * point ot the relevant link.
+   */
+  PN_LINK_LOCAL_CLOSE,
+
+  /**
+   * The remote endpoint has closed the link. Events of this type
+   * point to the relevant link.
+   */
+  PN_LINK_REMOTE_CLOSE,
+
+  /**
+   * The local link endpoint has been detached. Events of this type
+   * point to the relevant link.
+   */
+  PN_LINK_LOCAL_DETACH,
+
+  /**
+   * The remote endpoint has detached the link. Events of this type
+   * point to the relevant link.
+   */
+  PN_LINK_REMOTE_DETACH,
+
   /**
    * The flow control state for a link has changed. Events of this
-   * type point to the relevant link along with its associated
-   * session, connection, and transport.
+   * type point to the relevant link.
    */
-  PN_LINK_FLOW = PN_EVENT_CATEGORY_PROTOCOL+7,
+  PN_LINK_FLOW,
+
+  /**
+   * The link has been freed and any outstanding processing has been
+   * completed. This is the final event that will ever be issued for a
+   * link. Events of this type point to the relevant link.
+   */
+  PN_LINK_FINAL,
+
   /**
    * A delivery has been created or updated. Events of this type point
-   * to the relevant delivery as well as its associated link, session,
-   * connection, and transport.
+   * to the relevant delivery.
    */
-  PN_DELIVERY = PN_EVENT_CATEGORY_PROTOCOL+8,
+  PN_DELIVERY,
+
   /**
    * The transport has new data to read and/or write. Events of this
-   * type point to the relevant transport as well as its associated
-   * connection.
+   * type point to the relevant transport.
    */
-  PN_TRANSPORT = PN_EVENT_CATEGORY_PROTOCOL+9
+  PN_TRANSPORT,
+
+  /**
+   * Indicates that a transport error has occurred. Use
+   * ::pn_transport_condition() to access the details of the error
+   * from the associated transport.
+   */
+  PN_TRANSPORT_ERROR,
+
+  /**
+   * Indicates that the head of the transport has been closed. This
+   * means the transport will never produce more bytes for output to
+   * the network. Events of this type point to the relevant transport.
+   */
+  PN_TRANSPORT_HEAD_CLOSED,
+
+  /**
+   * Indicates that the tail of the transport has been closed. This
+   * means the transport will never be able to process more bytes from
+   * the network. Events of this type point to the relevant transport.
+   */
+  PN_TRANSPORT_TAIL_CLOSED,
+
+  /**
+   * Indicates that the both the head and tail of the transport are
+   * closed. Events of this type point to the relevant transport.
+   */
+  PN_TRANSPORT_CLOSED,
+
+  PN_SELECTABLE_INIT,
+  PN_SELECTABLE_UPDATED,
+  PN_SELECTABLE_READABLE,
+  PN_SELECTABLE_WRITABLE,
+  PN_SELECTABLE_ERROR,
+  PN_SELECTABLE_EXPIRED,
+  PN_SELECTABLE_FINAL
+
 } pn_event_type_t;
 
 /**
@@ -161,6 +325,36 @@ PN_EXTERN pn_collector_t *pn_collector(void);
 PN_EXTERN void pn_collector_free(pn_collector_t *collector);
 
 /**
+ * Release a collector. Once in a released state a collector will
+ * drain any internally queued events (thereby releasing any pointers
+ * they may hold), shrink it's memory footprint to a minimum, and
+ * discard any newly created events.
+ *
+ * @param[in] collector a collector object
+ */
+PN_EXTERN void pn_collector_release(pn_collector_t *collector);
+
+/**
+ * Place a new event on a collector.
+ *
+ * This operation will create a new event of the given type and
+ * context and return a pointer to the newly created event. In some
+ * cases an event of the given type and context can be elided. When
+ * this happens, this operation will return a NULL pointer.
+ *
+ * @param[in] collector a collector object
+ * @param[in] type the event type
+ * @param[in] context the event context
+ *
+ * @return a pointer to the newly created event or NULL if the event
+ *         was elided
+ */
+
+PN_EXTERN pn_event_t *pn_collector_put(pn_collector_t *collector,
+                                       const pn_class_t *clazz, void *context,
+                                       pn_event_type_t type);
+
+/**
  * Access the head event contained by a collector.
  *
  * This operation will continue to return the same event until it is
@@ -182,6 +376,16 @@ PN_EXTERN pn_event_t *pn_collector_peek(pn_collector_t *collector);
 PN_EXTERN bool pn_collector_pop(pn_collector_t *collector);
 
 /**
+ * Check if there are more events after the current event. If this
+ * returns true, then pn_collector_peek() will return an event even
+ * after pn_collector_pop() is called.
+ *
+ * @param[in] collector a collector object
+ * @return true if the collector has more than the current event
+ */
+PN_EXTERN  bool pn_collector_more(pn_collector_t *collector);
+
+/**
  * Get the type of an event.
  *
  * @param[in] event an event object
@@ -190,12 +394,17 @@ PN_EXTERN bool pn_collector_pop(pn_collector_t *collector);
 PN_EXTERN pn_event_type_t pn_event_type(pn_event_t *event);
 
 /**
- * Get the category an event belongs to.
+ * Get the class associated with the event context.
  *
  * @param[in] event an event object
- * @return the category the event belongs to
+ * @return the class associated with the event context
  */
-PN_EXTERN pn_event_category_t pn_event_category(pn_event_t *event);
+PN_EXTERN const pn_class_t *pn_event_class(pn_event_t *event);
+
+/**
+ * Get the context associated with an event.
+ */
+PN_EXTERN void *pn_event_context(pn_event_t *event);
 
 /**
  * Get the connection associated with an event.
@@ -236,6 +445,14 @@ PN_EXTERN pn_delivery_t *pn_event_delivery(pn_event_t *event);
  * @return the transport associated with the event (or NULL)
  */
 PN_EXTERN pn_transport_t *pn_event_transport(pn_event_t *event);
+
+/**
+ * Get any attachments associated with an event.
+ *
+ * @param[in] event an event object
+ * @return the record holding the attachments
+ */
+PN_EXTERN pn_record_t *pn_event_attachments(pn_event_t *event);
 
 #ifdef __cplusplus
 }

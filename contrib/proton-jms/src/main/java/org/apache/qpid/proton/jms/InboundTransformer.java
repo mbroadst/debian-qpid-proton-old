@@ -115,11 +115,6 @@ public abstract class InboundTransformer {
         } else {
             jms.setJMSPriority(defaultPriority);
         }
-        if( header.getTtl()!=null ) {
-            jms.setJMSExpiration(header.getTtl().longValue());
-        } else {
-            jms.setJMSExpiration(defaultTtl);
-        }
         if( header.getFirstAcquirer() !=null ) {
             jms.setBooleanProperty(prefixVendor + "FirstAcquirer", header.getFirstAcquirer());
         }
@@ -129,7 +124,7 @@ public abstract class InboundTransformer {
 
         final DeliveryAnnotations da = amqp.getDeliveryAnnotations();
         if( da!=null ) {
-            for (Map.Entry entry : (Set<Map.Entry>)da.getValue().entrySet()) {
+            for (Map.Entry<?,?> entry : da.getValue().entrySet()) {
                 String key = entry.getKey().toString();
                 setProperty(jms, prefixVendor + prefixDeliveryAnnotations + key, entry.getValue());
             }
@@ -140,13 +135,13 @@ public abstract class InboundTransformer {
 
         final MessageAnnotations ma = amqp.getMessageAnnotations();
         if( ma!=null ) {
-            for (Map.Entry entry : (Set<Map.Entry>)ma.getValue().entrySet()) {
+            for (Map.Entry<?,?> entry : ma.getValue().entrySet()) {
                 String key = entry.getKey().toString();
-                if( "x-opt-jms-type".equals(key) ) {
+                if( "x-opt-jms-type".equals(key.toString()) && entry.getValue() != null ) {
                     jms.setJMSType(entry.getValue().toString());
-                } else if( "x-opt-to-type".equals(key) ) {
+                } else if( "x-opt-to-type".equals(key.toString()) ) {
                     toAttributes = toClassFromAttributes(entry.getValue().toString());
-                } else if( "x-opt-reply-type".equals(key) ) {
+                } else if( "x-opt-reply-type".equals(key.toString()) ) {
                     replyToAttributes = toClassFromAttributes(entry.getValue().toString());
                 } else {
                     setProperty(jms, prefixVendor + prefixMessageAnnotations + key, entry.getValue());
@@ -208,6 +203,23 @@ public abstract class InboundTransformer {
             }
             if( properties.getReplyToGroupId()!=null ) {
                 jms.setStringProperty(prefixVendor + "ReplyToGroupID", properties.getReplyToGroupId());
+            }
+            if( properties.getAbsoluteExpiryTime()!=null ) {
+                jms.setJMSExpiration(properties.getAbsoluteExpiryTime().getTime());
+            }
+        }
+
+        // If the jms expiration has not yet been set...
+        if( jms.getJMSExpiration()==0 ) {
+            // Then lets try to set it based on the message ttl.
+            long ttl = defaultTtl;
+            if( header.getTtl()!=null ) {
+                ttl = header.getTtl().longValue();
+            }
+            if( ttl == 0 ) {
+              jms.setJMSExpiration(0);
+            } else {
+                jms.setJMSExpiration(System.currentTimeMillis()+ttl);
             }
         }
 

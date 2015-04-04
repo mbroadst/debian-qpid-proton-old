@@ -65,7 +65,10 @@ sub get_impl {
 
 sub clear {
     my ($self) = @_;
-    cproton__perl::pn_message_clear($self->{_impl});
+    my $impl = $self->{_impl};
+
+    cproton_perl::pn_message_clear($impl);
+
     $self->{_body} = undef;
     $self->{_properties} = {};
     $self->{_instructions} = {};
@@ -226,20 +229,6 @@ sub set_content_type {
 sub get_content_type {
     my ($self) = @_;
     return cproton_perl::pn_message_get_content_type($self->{_impl});
-}
-
-sub set_content {
-    my ($self) = @_;
-    my $content = $_[1];
-
-    cproton_perl::pn_message_load($self->{_impl}, $content);
-}
-
-sub get_content {
-    my ($self) = @_;
-    my $content = cproton_perl::pn_message_save($self->{_impl}, 1024);
-
-    return cproton_perl::pn_message_save($self->{_impl}, 1024);
 }
 
 sub set_content_encoding {
@@ -443,7 +432,29 @@ B<qpid::proton::STRING>.
 sub set_body {
     my ($self) = @_;
     my $body = $_[1];
-    my $body_type = $_[2] || qpid::proton::STRING;
+    my $body_type = $_[2] || undef;
+
+    # if no body type was defined, then attempt to infer what it should
+    # be, which is going to be a best guess
+    if (!defined($body_type)) {
+        if (qpid::proton::utils::is_num($body)) {
+            if (qpid::proton::is_float($body)) {
+                $body_type = qpid::proton::FLOAT;
+            } else {
+                $body_type = qpid::proton::INT;
+            }
+        } elsif (!defined($body)) {
+            $body_type =  qpid::proton::NULL;
+        } elsif ($body eq '') {
+            $body_type =  qpid::proton::STRING;
+        } elsif (ref($body) eq 'HASH') {
+            $body_type =  qpid::proton::MAP;
+        } elsif (ref($body) eq 'ARRAY') {
+            $body_type =  qpid::proton::LIST;
+        } else {
+            $body_type =  qpid::proton::STRING;
+        }
+    }
 
     $self->{_body} = $body;
     $self->{_body_type} = $body_type;
@@ -465,12 +476,12 @@ sub get_body_type {
 sub preencode() {
     my ($self) = @_;
     my $impl = $self->{_impl};
-
     my $my_body = $self->{_body};
     my $body_type = $self->{_body_type};
     my $body = new qpid::proton::Data(cproton_perl::pn_message_body($impl));
+
     $body->clear();
-    $body_type->put($body, $my_body) if($my_body && $body_type);
+    $body_type->put($body, $my_body) if(defined($my_body) && $body_type);
 
     my $my_props = $self->{_properties};
     my $props = new qpid::proton::Data(cproton_perl::pn_message_properties($impl));

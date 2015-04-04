@@ -46,11 +46,17 @@ find_package(OpenSSL)
 
 find_package (PythonInterp REQUIRED)
 
-set(ssl_impl, none)
+if(PN_WINAPI)
+  set(ssl_impl schannel)
+  set(ssl_providers "'none','schannel','openssl'")
+else(PN_WINAPI)
+  set(ssl_impl, none)
+  set(ssl_providers "'none','openssl'")
+endif(PN_WINAPI)
 if (OPENSSL_FOUND)
   set(ssl_impl openssl)
-endif(OPENSSL_FOUND)
-set(SSL_IMPL ${ssl_impl} CACHE STRING "Library to use for SSL/TLS support. Valid values: 'none','openssl'")
+endif (OPENSSL_FOUND)
+set(SSL_IMPL ${ssl_impl} CACHE STRING "Library to use for SSL/TLS support. Valid values: ${ssl_providers}")
 mark_as_advanced (SSL_IMPL)
 
 configure_file (
@@ -58,40 +64,50 @@ configure_file (
   "${CMAKE_CURRENT_BINARY_DIR}/include/proton/version.h"
   )
 
-include_directories ("${CMAKE_CURRENT_BINARY_DIR}")
+include_directories ("${CMAKE_CURRENT_BINARY_DIR}/src")
 include_directories ("${CMAKE_CURRENT_BINARY_DIR}/include")
+include_directories ("${CMAKE_CURRENT_SOURCE_DIR}/src")
 include_directories ("${CMAKE_CURRENT_SOURCE_DIR}/include")
-include_directories ("${CMAKE_CURRENT_SOURCE_DIR}/../examples/include")
+
+# TODO: This is only needed because the proton executable can use getopt on windows
+# if/when this executable gets sorted out remove
+include_directories ("${CMAKE_SOURCE_DIR}/examples/include")
+
+set (env_py ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/env.py)
 
 add_custom_command (
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/encodings.h
-  COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/env.py PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR} ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/codec/encodings.h.py > ${CMAKE_CURRENT_BINARY_DIR}/encodings.h
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/src/encodings.h
+  COMMAND ${env_py} PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR} ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/codec/encodings.h.py > ${CMAKE_CURRENT_BINARY_DIR}/src/encodings.h
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/codec/encodings.h.py
   )
 
 add_custom_command (
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/protocol.h
-  COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/env.py PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR} ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol.h.py > ${CMAKE_CURRENT_BINARY_DIR}/protocol.h
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/src/protocol.h
+  COMMAND ${env_py} PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR} ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol.h.py > ${CMAKE_CURRENT_BINARY_DIR}/src/protocol.h
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol.h.py
   )
 
-# Select driver
+# Select IO impl
 if(PN_WINAPI)
-  set (pn_io_impl src/windows/io.c)
+  set (pn_io_impl src/windows/io.c src/windows/iocp.c src/windows/write_pipeline.c)
   set (pn_selector_impl src/windows/selector.c)
-  set (pn_driver_impl src/windows/driver.c)
 else(PN_WINAPI)
   set (pn_io_impl src/posix/io.c)
   set (pn_selector_impl src/posix/selector.c)
-  set (pn_driver_impl src/posix/driver.c)
 endif(PN_WINAPI)
 
 # Link in openssl if present
 if (SSL_IMPL STREQUAL openssl)
-  set (pn_driver_ssl_impl src/ssl/openssl.c)
+  set (pn_ssl_impl src/ssl/openssl.c)
+  include_directories ("${OPENSSL_INCLUDE_DIR}")
   set (SSL_LIB ${OPENSSL_LIBRARIES})
 else (SSL_IMPL STREQUAL openssl)
-  set (pn_driver_ssl_impl src/ssl/ssl_stub.c)
+  if (SSL_IMPL STREQUAL schannel)
+    set (pn_ssl_impl src/windows/schannel.c)
+    set (SSL_LIB Crypt32.lib Secur32.lib)
+  else (SSL_IMPL STREQUAL schannel)
+    set (pn_ssl_impl src/ssl/ssl_stub.c)
+  endif (SSL_IMPL STREQUAL schannel)
 endif (SSL_IMPL STREQUAL openssl)
 
 # First check whether we get clock_gettime without any special library linked
@@ -209,8 +225,8 @@ if (CMAKE_COMPILER_IS_GNUCC)
       set (COMPILE_WARNING_FLAGS "${COMPILE_WARNING_FLAGS} -Wc++-compat -Wvla -Wsign-compare -Wwrite-strings")
     endif (${GCC_VERSION} VERSION_LESS "4.3.0")
   else (NOT BUILD_WITH_CXX)
-    # allow "%z" format specifier
-    set (COMPILE_WARNING_FLAGS "${COMPILE_WARNING_FLAGS} -Wno-format")
+    # allow "%z" format specifier and variadic macros
+    set (COMPILE_WARNING_FLAGS "${COMPILE_WARNING_FLAGS} -Wno-format -Wno-variadic-macros")
   endif (NOT BUILD_WITH_CXX)
 
   if (ENABLE_UNDEFINED_ERROR)
@@ -220,7 +236,13 @@ if (CMAKE_COMPILER_IS_GNUCC)
 endif (CMAKE_COMPILER_IS_GNUCC)
 
 if (MSVC)
-	set(CMAKE_DEBUG_POSTFIX "d")
+    set(CMAKE_DEBUG_POSTFIX "d")
+    add_definitions(
+        /wd4244
+        /wd4267
+        /wd4800
+        /wd4996
+    )
 endif (MSVC)
 
 macro (pn_absolute_install_dir NAME VALUE PREFIX)
@@ -246,15 +268,21 @@ add_subdirectory(../tests/tools/apps/c ../tests/tools/apps/c)
 set (qpid-proton-platform
   ${pn_io_impl}
   ${pn_selector_impl}
-  ${pn_driver_impl}
   src/platform.c
-  ${pn_driver_ssl_impl}
+  ${pn_ssl_impl}
   )
 
 set (qpid-proton-core
   src/object/object.c
+  src/object/list.c
+  src/object/map.c
+  src/object/string.c
+  src/object/iterator.c
+  src/object/record.c
 
+  src/log.c
   src/util.c
+  src/url.c
   src/error.c
   src/buffer.c
   src/parser.c
@@ -269,10 +297,21 @@ set (qpid-proton-core
 
   src/dispatcher/dispatcher.c
   src/engine/engine.c
-  src/engine/event.c
+  src/events/event.c
+  src/transport/autodetect.c
   src/transport/transport.c
   src/message/message.c
   src/sasl/sasl.c
+
+  src/reactor/reactor.c
+  src/reactor/handler.c
+  src/reactor/connection.c
+  src/reactor/acceptor.c
+  src/reactor/timer.c
+
+  src/handlers/handshaker.c
+  src/handlers/iohandler.c
+  src/handlers/flowcontroller.c
 
   src/messenger/messenger.c
   src/messenger/subscription.c
@@ -280,8 +319,8 @@ set (qpid-proton-core
   src/messenger/transform.c
   src/selectable.c
 
-  ${CMAKE_CURRENT_BINARY_DIR}/encodings.h
-  ${CMAKE_CURRENT_BINARY_DIR}/protocol.h
+  ${CMAKE_CURRENT_BINARY_DIR}/src/encodings.h
+  ${CMAKE_CURRENT_BINARY_DIR}/src/protocol.h
   )
 
 set_source_files_properties (
@@ -319,14 +358,11 @@ if (MSVC)
   include(WindowsC99CheckDef)
 endif(MSVC)
 
-add_executable (proton src/proton.c)
-target_link_libraries (proton qpid-proton)
-
 add_executable (proton-dump src/proton-dump.c)
 target_link_libraries (proton-dump qpid-proton)
 
 set_target_properties (
-  proton proton-dump
+  proton-dump
   PROPERTIES
   COMPILE_FLAGS "${COMPILE_WARNING_FLAGS} ${COMPILE_PLATFORM_FLAGS}"
   )
@@ -342,10 +378,10 @@ macro(pn_c_files)
   endforeach (src_file)
 endmacro(pn_c_files)
 
-pn_c_files (${qpid-proton-core} ${qpid-proton-platform} src/proton.c src/proton-dump.c)
+pn_c_files (${qpid-proton-core} ${qpid-proton-platform} src/proton-dump.c)
 
 # Install executables and libraries
-install (TARGETS proton proton-dump
+install (TARGETS proton-dump
   RUNTIME DESTINATION bin
   ARCHIVE DESTINATION ${LIB_INSTALL_DIR}
   LIBRARY DESTINATION ${LIB_INSTALL_DIR})
@@ -354,6 +390,18 @@ install (TARGETS qpid-proton
   RUNTIME DESTINATION bin
   ARCHIVE DESTINATION ${LIB_INSTALL_DIR}
   LIBRARY DESTINATION ${LIB_INSTALL_DIR})
+
+# Install windows qpid-proton pdb files
+if (MSVC)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/Debug/qpid-proton${CMAKE_DEBUG_POSTFIX}.pdb
+    DESTINATION bin 
+    CONFIGURATIONS Debug
+    OPTIONAL)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/RelWithDebInfo/qpid-proton.pdb
+    DESTINATION bin 
+    CONFIGURATIONS RelWithDebInfo
+    OPTIONAL)
+endif (MSVC)
 
 # Install header files
 file(GLOB headers "include/proton/*.[hi]")
@@ -425,9 +473,6 @@ else (CMAKE_SYSTEM_NAME STREQUAL Windows)
 
 endif (CMAKE_SYSTEM_NAME STREQUAL Windows)
 
-
-set (env_py "${CMAKE_CURRENT_SOURCE_DIR}/env.py" )
-
 find_program(VALGRIND_EXE valgrind DOC "Location of the valgrind program")
 option(ENABLE_VALGRIND "Use valgrind to detect run-time problems" ON)
 if (ENABLE_VALGRIND)
@@ -445,21 +490,23 @@ mark_as_advanced (VALGRIND_EXE)
 add_subdirectory(src/tests)
 
 # python test: tests/python/proton-test
-set (py_root "${pn_test_root}/python")
-set (py_src "${CMAKE_CURRENT_SOURCE_DIR}/bindings/python")
-set (py_bin "${CMAKE_CURRENT_BINARY_DIR}/bindings/python")
-set (py_bld "${CMAKE_CURRENT_BINARY_DIR}${bld_suffix}") # For windows
-set (app_path "${pn_test_bin}/tools/apps/c${bld_suffix}")
-set (app_path "${app_path}:${pn_test_root}/tools/apps/python")
-set_path (py_path "$ENV{PATH}:${py_bin}:${py_bld}:${app_path}")
-set_path (py_pythonpath "$ENV{PYTHONPATH}:${py_root}:${py_src}:${py_bin}:${py_bld}")
-if (CMAKE_SYSTEM_NAME STREQUAL Windows)
-  set_path (py_pythonpath "${py_pythonpath}:${py_bin}${bld_suffix}")
-endif (CMAKE_SYSTEM_NAME STREQUAL Windows)
-add_test (python-test ${PYTHON_EXECUTABLE} ${env_py}
-         "PATH=${py_path}" "PYTHONPATH=${py_pythonpath}" ${VALGRIND_ENV}
-         ${PYTHON_EXECUTABLE} "${py_root}/proton-test")
-set_tests_properties(python-test PROPERTIES PASS_REGULAR_EXPRESSION "Totals: .* 0 failed")
+if (BUILD_PYTHON)
+  set (py_root "${pn_test_root}/python")
+  set (py_src "${CMAKE_CURRENT_SOURCE_DIR}/bindings/python")
+  set (py_bin "${CMAKE_CURRENT_BINARY_DIR}/bindings/python")
+  set (py_bld "${CMAKE_CURRENT_BINARY_DIR}${bld_suffix}") # For windows
+  set (app_path "${pn_test_bin}/tools/apps/c${bld_suffix}")
+  set (app_path "${app_path}:${pn_test_root}/tools/apps/python")
+  set_path (py_path "${py_bin}:${py_bld}:${app_path}:$ENV{PATH}")
+  set_path (py_pythonpath "${py_root}:${py_src}:${py_bin}:${py_bld}|$ENV{PYTHONPATH}")
+  if (CMAKE_SYSTEM_NAME STREQUAL Windows)
+    set_path (py_pythonpath "${py_bin}${bld_suffix}:${py_pythonpath}")
+  endif (CMAKE_SYSTEM_NAME STREQUAL Windows)
+  add_test (python-test ${env_py}
+            "PATH=${py_path}" "PYTHONPATH=${py_pythonpath}" ${VALGRIND_ENV}
+            ${PYTHON_EXECUTABLE} "${py_root}/proton-test")
+  set_tests_properties(python-test PROPERTIES PASS_REGULAR_EXPRESSION "Totals: .* 0 failed")
+endif (BUILD_PYTHON)
 
 find_program(RUBY_EXE "ruby")
 if (RUBY_EXE)
@@ -474,7 +521,7 @@ if (RUBY_EXE)
   # ruby unit tests:  tests/ruby/proton-test
   # only enable the tests if the Ruby gem dependencies were found
   if (DEFAULT_RUBY_TESTING)
-    add_test (ruby-unit-test ${PYTHON_EXECUTABLE} ${env_py} "PATH=${rb_path}" "RUBYLIB=${rb_rubylib}"
+    add_test (ruby-unit-test ${env_py} "PATH=${rb_path}" "RUBYLIB=${rb_rubylib}"
       "${rb_root}/proton-test")
 
     # ruby spec tests
@@ -482,7 +529,7 @@ if (RUBY_EXE)
     if (RSPEC_EXE)
       add_test (NAME ruby-spec-test
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bindings/ruby
-                COMMAND ${PYTHON_EXECUTABLE} ${env_py} "PATH=${rb_path}" "RUBYLIB=${rb_rubylib}"
+                COMMAND ${env_py} "PATH=${rb_path}" "RUBYLIB=${rb_rubylib}"
                         ${RSPEC_EXE})
 
     else(RSPEC_EXE)
@@ -496,6 +543,11 @@ else (RUBY_EXE)
 endif (RUBY_EXE)
 
 mark_as_advanced (RUBY_EXE RSPEC_EXE)
+
+if (BUILD_JAVASCRIPT)
+  add_test (javascript-codec ${env_py} node ${pn_test_root}/javascript/codec.js)
+  add_test (javascript-message ${env_py} node ${pn_test_root}/javascript/message.js)
+endif (BUILD_JAVASCRIPT)
 
 # build examples to make sure they still work
 add_subdirectory(../examples ../examples)

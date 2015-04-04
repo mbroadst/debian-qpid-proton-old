@@ -21,6 +21,7 @@
 package org.apache.qpid.proton.engine.impl;
 
 import org.apache.qpid.proton.engine.Event;
+import org.apache.qpid.proton.engine.Handler;
 import org.apache.qpid.proton.engine.Connection;
 import org.apache.qpid.proton.engine.Session;
 import org.apache.qpid.proton.engine.Link;
@@ -36,20 +37,24 @@ class EventImpl implements Event
 {
 
     Type type;
-    Connection connection;
-    Session session;
-    Link link;
-    Delivery delivery;
-    Transport transport;
+    Object context;
+    EventImpl next;
 
-    EventImpl(Type type)
+    EventImpl()
     {
-        this.type = type;
+        this.type = null;
     }
 
-    public Category getCategory()
+    void init(Event.Type type, Object context)
     {
-        return type.getCategory();
+        this.type = type;
+        this.context = context;
+    }
+
+    void clear()
+    {
+        type = null;
+        context = null;
     }
 
     public Type getType()
@@ -57,58 +62,180 @@ class EventImpl implements Event
         return type;
     }
 
+    public Object getContext()
+    {
+        return context;
+    }
+
+    public void dispatch(Handler handler)
+    {
+        switch (type) {
+        case CONNECTION_INIT:
+            handler.onConnectionInit(this);
+            break;
+        case CONNECTION_LOCAL_OPEN:
+            handler.onConnectionLocalOpen(this);
+            break;
+        case CONNECTION_REMOTE_OPEN:
+            handler.onConnectionRemoteOpen(this);
+            break;
+        case CONNECTION_LOCAL_CLOSE:
+            handler.onConnectionLocalClose(this);
+            break;
+        case CONNECTION_REMOTE_CLOSE:
+            handler.onConnectionRemoteClose(this);
+            break;
+        case CONNECTION_BOUND:
+            handler.onConnectionBound(this);
+            break;
+        case CONNECTION_UNBOUND:
+            handler.onConnectionUnbound(this);
+            break;
+        case CONNECTION_FINAL:
+            handler.onConnectionFinal(this);
+            break;
+        case SESSION_INIT:
+            handler.onSessionInit(this);
+            break;
+        case SESSION_LOCAL_OPEN:
+            handler.onSessionLocalOpen(this);
+            break;
+        case SESSION_REMOTE_OPEN:
+            handler.onSessionRemoteOpen(this);
+            break;
+        case SESSION_LOCAL_CLOSE:
+            handler.onSessionLocalClose(this);
+            break;
+        case SESSION_REMOTE_CLOSE:
+            handler.onSessionRemoteClose(this);
+            break;
+        case SESSION_FINAL:
+            handler.onSessionFinal(this);
+            break;
+        case LINK_INIT:
+            handler.onLinkInit(this);
+            break;
+        case LINK_LOCAL_OPEN:
+            handler.onLinkLocalOpen(this);
+            break;
+        case LINK_REMOTE_OPEN:
+            handler.onLinkRemoteOpen(this);
+            break;
+        case LINK_LOCAL_DETACH:
+            handler.onLinkLocalDetach(this);
+            break;
+        case LINK_REMOTE_DETACH:
+            handler.onLinkRemoteDetach(this);
+            break;
+        case LINK_LOCAL_CLOSE:
+            handler.onLinkLocalClose(this);
+            break;
+        case LINK_REMOTE_CLOSE:
+            handler.onLinkRemoteClose(this);
+            break;
+        case LINK_FLOW:
+            handler.onLinkFlow(this);
+            break;
+        case LINK_FINAL:
+            handler.onLinkFinal(this);
+            break;
+        case DELIVERY:
+            handler.onDelivery(this);
+            break;
+        case TRANSPORT:
+            handler.onTransport(this);
+            break;
+        case TRANSPORT_ERROR:
+            handler.onTransportError(this);
+            break;
+        case TRANSPORT_HEAD_CLOSED:
+            handler.onTransportHeadClosed(this);
+            break;
+        case TRANSPORT_TAIL_CLOSED:
+            handler.onTransportTailClosed(this);
+            break;
+        case TRANSPORT_CLOSED:
+            handler.onTransportClosed(this);
+            break;
+        default:
+            handler.onUnhandled(this);
+            break;
+        }
+    }
+
     public Connection getConnection()
     {
-        return connection;
+        if (context instanceof Connection) {
+            return (Connection) context;
+        } else if (context instanceof Transport) {
+            Transport transport = getTransport();
+            if (transport == null) {
+                return null;
+            }
+            return ((TransportImpl) transport).getConnectionImpl();
+        } else {
+            Session ssn = getSession();
+            if (ssn == null) {
+                return null;
+            }
+            return ssn.getConnection();
+        }
     }
 
     public Session getSession()
     {
-        return session;
+        if (context instanceof Session) {
+            return (Session) context;
+        } else {
+            Link link = getLink();
+            if (link == null) {
+                return null;
+            }
+            return link.getSession();
+        }
     }
 
     public Link getLink()
     {
-        return link;
+        if (context instanceof Link) {
+            return (Link) context;
+        } else {
+            Delivery dlv = getDelivery();
+            if (dlv == null) {
+                return null;
+            }
+            return dlv.getLink();
+        }
     }
 
     public Delivery getDelivery()
     {
-        return delivery;
+        if (context instanceof Delivery) {
+            return (Delivery) context;
+        } else {
+            return null;
+        }
     }
 
     public Transport getTransport()
     {
-        return transport;
+        if (context instanceof Transport) {
+            return (Transport) context;
+        } else {
+            return null;
+        }
+    }
+    public Event copy()
+    {
+       EventImpl newEvent = new EventImpl();
+       newEvent.init(type, context);
+       return newEvent;
     }
 
-    void init(Transport transport)
+    @Override
+    public String toString()
     {
-        this.transport = transport;
-    }
-
-    void init(Connection connection)
-    {
-        this.connection = connection;
-        init(((ConnectionImpl) connection).getTransport());
-    }
-
-    void init(Session session)
-    {
-        this.session = session;
-        init(session.getConnection());
-    }
-
-    void init(Link link)
-    {
-        this.link = link;
-        init(link.getSession());
-    }
-
-    void init(Delivery delivery)
-    {
-        this.delivery = delivery;
-        init(delivery.getLink());
+        return "EventImpl{" + "type=" + type + ", context=" + context + '}';
     }
 
 }

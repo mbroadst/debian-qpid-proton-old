@@ -56,8 +56,8 @@ static void pn_encoder_finalize(void *obj) {
 
 pn_encoder_t *pn_encoder()
 {
-  static pn_class_t clazz = PN_CLASS(pn_encoder);
-  return (pn_encoder_t *) pn_new(sizeof(pn_encoder_t), &clazz);
+  static const pn_class_t clazz = PN_CLASS(pn_encoder);
+  return (pn_encoder_t *) pn_class_new(&clazz, sizeof(pn_encoder_t));
 }
 
 static uint8_t pn_type2code(pn_encoder_t *encoder, pn_type_t type)
@@ -97,6 +97,18 @@ static uint8_t pn_type2code(pn_encoder_t *encoder, pn_type_t type)
 static uint8_t pn_node2code(pn_encoder_t *encoder, pni_node_t *node)
 {
   switch (node->atom.type) {
+  case PN_LONG:
+    if (-128 <= node->atom.u.as_long && node->atom.u.as_long <= 127) {
+      return PNE_SMALLLONG;
+    } else {
+      return PNE_LONG;
+    }
+  case PN_INT:
+    if (-128 <= node->atom.u.as_int && node->atom.u.as_int <= 127) {
+      return PNE_SMALLINT;
+    } else {
+      return PNE_INT;
+    }
   case PN_ULONG:
     if (node->atom.u.as_ulong < 256) {
       return PNE_SMALLULONG;
@@ -296,6 +308,7 @@ static int pni_encoder_enter(void *ctx, pn_data_t *data, pni_node_t *node)
   case PNE_ULONG: return pn_encoder_writef64(encoder, atom->u.as_ulong);
   case PNE_SMALLULONG: return pn_encoder_writef8(encoder, atom->u.as_ulong);
   case PNE_LONG: return pn_encoder_writef64(encoder, atom->u.as_long);
+  case PNE_SMALLLONG: return pn_encoder_writef8(encoder, atom->u.as_long);
   case PNE_MS64: return pn_encoder_writef64(encoder, atom->u.as_timestamp);
   case PNE_FLOAT: c.f = atom->u.as_float; return pn_encoder_writef32(encoder, c.i);
   case PNE_DOUBLE: c.d = atom->u.as_double; return pn_encoder_writef64(encoder, c.l);

@@ -25,7 +25,7 @@
 #include <proton/import_export.h>
 #include <sys/types.h>
 #include <proton/type_compat.h>
-#include <proton/engine.h>
+#include <proton/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,12 +54,12 @@ typedef enum {
   PN_SASL_AUTH=1,   /** failed due to bad credentials */
   PN_SASL_SYS=2,    /** failed due to a system error */
   PN_SASL_PERM=3,   /** failed due to unrecoverable error */
-  PN_SASL_TEMP=4    /** failed due to transient error */
+  PN_SASL_TEMP=4,   /** failed due to transient error */
+  PN_SASL_SKIPPED=5 /** the peer didn't perform the sasl exchange */
 } pn_sasl_outcome_t;
 
 /** The state of the SASL negotiation process */
 typedef enum {
-  PN_SASL_CONF,    /** Pending configuration by application */
   PN_SASL_IDLE,    /** Pending SASL Init */
   PN_SASL_STEP,    /** negotiation in progress */
   PN_SASL_PASS,    /** negotiation completed successfully */
@@ -95,23 +95,40 @@ PN_EXTERN void pn_sasl_mechanisms(pn_sasl_t *sasl, const char *mechanisms);
  */
 PN_EXTERN const char *pn_sasl_remote_mechanisms(pn_sasl_t *sasl);
 
-/** Configure the SASL layer to act as a SASL client.
+/**
+ * @deprecated
+ * Configure the SASL layer to act as a SASL client.
  *
- * The role of client is similar to a TCP client - the peer requesting
- * the connection.
+ * This is now unnecessary, and performs no function. The server/clientness
+ * of the sasl layer is determined from the role of the transport that is used to create
+ * it. The API is retained here so as not to break existing code.
  *
  * @param[in] sasl the SASL layer to configure as a client
  */
 PN_EXTERN void pn_sasl_client(pn_sasl_t *sasl);
 
-/** Configure the SASL layer to act as a server.
+/**
+ * @deprecated
+ * Configure the SASL layer to act as a server.
  *
- * The role of server is similar to a TCP server - the peer accepting
- * the connection.
+ * This is now only necessary for backwards compatibility if creating a server pn_sasl_t
+ * from a pn_transport_t which was created implicitly as a client by pn_transport().
  *
  * @param[in] sasl the SASL layer to configure as a server
  */
 PN_EXTERN void pn_sasl_server(pn_sasl_t *sasl);
+
+/** Configure a SASL server layer to permit the client to skip the SASL exchange.
+ *
+ * If the peer client skips the SASL exchange (i.e. goes right to the AMQP header)
+ * this server layer will succeed and result in the outcome of PN_SASL_SKIPPED.
+ * The default behavior is to fail and close the connection if the client skips
+ * SASL.
+ *
+ * @param[in] sasl the SASL layer to configure
+ * @param[in] allow true -> allow skip; false -> forbid skip
+ */
+PN_EXTERN void pn_sasl_allow_skip(pn_sasl_t *sasl, bool allow);
 
 /** Configure the SASL layer to use the "PLAIN" mechanism.
  *

@@ -21,7 +21,6 @@ import org.apache.qpid.proton.codec.CompositeWritableBuffer;
 import org.apache.qpid.proton.codec.WritableBuffer;
 import org.apache.qpid.proton.codec.DroppingWritableBuffer;
 import org.apache.qpid.proton.message.ProtonJMessage;
-import org.apache.qpid.proton.message.impl.MessageFactoryImpl;
 import org.apache.qpid.proton.amqp.Binary;
 import org.apache.qpid.proton.amqp.Symbol;
 import org.apache.qpid.proton.amqp.UnsignedByte;
@@ -37,15 +36,9 @@ import java.util.Enumeration;
 import java.util.HashMap;
 
 /**
-* @author <a href="http://hiramchirino.com">Hiram Chirino</a>
-*/
+ * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
+ */
 public class JMSMappingOutboundTransformer extends OutboundTransformer {
-
-    private static final MessageFactoryImpl MESSAGE_FACTORY = new MessageFactoryImpl();
-
-    String prefixDeliveryAnnotations = "DA_";
-    String prefixMessageAnnotations= "MA_";
-    String prefixFooter = "FT_";
 
     public JMSMappingOutboundTransformer(JMSVendor vendor) {
         super(vendor);
@@ -62,34 +55,41 @@ public class JMSMappingOutboundTransformer extends OutboundTransformer {
         } catch (MessageFormatException e) {
             return null;
         }
-        return transform(this, msg);
-    }
-
-    static EncodedMessage transform(JMSMappingOutboundTransformer options, Message msg) throws JMSException, UnsupportedEncodingException {
-        final JMSVendor vendor = options.vendor;
-
-        final String messageFormatKey = options.prefixVendor + "MESSAGE_FORMAT";
-        final String nativeKey = options.prefixVendor + "NATIVE";
-        final String firstAcquirerKey = options.prefixVendor + "FirstAcquirer";
-        final String prefixDeliveryAnnotationsKey = options.prefixVendor + options.prefixDeliveryAnnotations;
-        final String prefixMessageAnnotationsKey = options.prefixVendor + options.prefixMessageAnnotations;
-        final String subjectKey =  options.prefixVendor +"Subject";
-        final String contentTypeKey = options.prefixVendor +"ContentType";
-        final String contentEncodingKey = options.prefixVendor +"ContentEncoding";
-        final String replyToGroupIDKey = options.prefixVendor +"ReplyToGroupID";
-        final String prefixFooterKey = options.prefixVendor + options.prefixFooter;
+        ProtonJMessage amqp = convert(msg);
 
         long messageFormat;
         try {
-            messageFormat = msg.getLongProperty(messageFormatKey);
+            messageFormat = msg.getLongProperty(this.messageFormatKey);
         } catch (MessageFormatException e) {
             return null;
         }
 
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[1024 * 4]);
+        final DroppingWritableBuffer overflow = new DroppingWritableBuffer();
+        int c = amqp.encode(new CompositeWritableBuffer(
+                new WritableBuffer.ByteBufferWrapper(buffer), overflow));
+        if( overflow.position() > 0 ) {
+            buffer = ByteBuffer.wrap(new byte[1024 * 4 + overflow.position()]);
+            c = amqp.encode(new WritableBuffer.ByteBufferWrapper(buffer));
+        }
+
+        return new EncodedMessage(messageFormat, buffer.array(), 0, c);
+    }
+
+    /**
+     * Perform the conversion between JMS Message and Proton Message without re-encoding it to array.
+     * This is needed because some frameworks may elect to do this on their own way (Netty for instance using Nettybuffers)
+     *
+     * @param msg
+     * @return
+     * @throws Exception
+     */
+    public ProtonJMessage convert(Message msg)
+            throws JMSException, UnsupportedEncodingException {
         Header header = new Header();
         Properties props=new Properties();
-        HashMap daMap = null;
-        HashMap maMap = null;
+        HashMap<Symbol, Object> daMap = null;
+        HashMap<Symbol, Object> maMap = null;
         HashMap apMap = null;
         Section body=null;
         HashMap footerMap = null;
@@ -97,6 +97,7 @@ public class JMSMappingOutboundTransformer extends OutboundTransformer {
             BytesMessage m = (BytesMessage)msg;
             byte data[] = new byte[(int) m.getBodyLength()];
             m.readBytes(data);
+            m.reset(); //Need to reset after readBytes or future readBytes calls (ex: redeliveries) will fail and return -1
             body = new Data(new Binary(data));
         } if( msg instanceof TextMessage ) {
             body = new AmqpValue(((TextMessage) msg).getText());
@@ -124,12 +125,9 @@ public class JMSMappingOutboundTransformer extends OutboundTransformer {
 
         header.setDurable(msg.getJMSDeliveryMode() == DeliveryMode.PERSISTENT ? true : false);
         header.setPriority(new UnsignedByte((byte) msg.getJMSPriority()));
-        if( msg.getJMSExpiration() != 0 ) {
-            header.setTtl(new UnsignedInteger((int) msg.getJMSExpiration()));
-        }
         if( msg.getJMSType()!=null ) {
-            if( maMap==null ) maMap = new HashMap();
-            maMap.put("x-opt-jms-type", msg.getJMSType());
+            if( maMap==null ) maMap = new HashMap<Symbol, Object>();
+            maMap.put(Symbol.valueOf("x-opt-jms-type"), msg.getJMSType());
         }
         if( msg.getJMSMessageID()!=null ) {
             props.setMessageId(msg.getJMSMessageID());
@@ -137,17 +135,23 @@ public class JMSMappingOutboundTransformer extends OutboundTransformer {
         if( msg.getJMSDestination()!=null ) {
             props.setTo(vendor.toAddress(msg.getJMSDestination()));
             if( maMap==null ) maMap = new HashMap();
-            maMap.put("x-opt-to-type", destinationAttributes(msg.getJMSDestination()));
+            maMap.put(Symbol.valueOf("x-opt-to-type"), destinationAttributes(msg.getJMSDestination()));
         }
         if( msg.getJMSReplyTo()!=null ) {
             props.setReplyTo(vendor.toAddress(msg.getJMSReplyTo()));
             if( maMap==null ) maMap = new HashMap();
-            maMap.put("x-opt-reply-type", destinationAttributes(msg.getJMSReplyTo()));
+            maMap.put(Symbol.valueOf("x-opt-reply-type"), destinationAttributes(msg.getJMSReplyTo()));
         }
         if( msg.getJMSCorrelationID()!=null ) {
             props.setCorrelationId(msg.getJMSCorrelationID());
         }
         if( msg.getJMSExpiration() != 0 ) {
+            long ttl = msg.getJMSExpiration() - System.currentTimeMillis();
+            if (ttl < 0) {
+                ttl = 1;
+            }
+            header.setTtl(new UnsignedInteger((int)ttl));
+
             props.setAbsoluteExpiryTime(new Date(msg.getJMSExpiration()));
         }
         if( msg.getJMSTimestamp()!= 0 ) {
@@ -162,7 +166,12 @@ public class JMSMappingOutboundTransformer extends OutboundTransformer {
             } else if( key.equals(firstAcquirerKey) ) {
                 header.setFirstAcquirer(msg.getBooleanProperty(key));
             } else if( key.startsWith("JMSXDeliveryCount") ) {
-                header.setDeliveryCount(new UnsignedInteger(msg.getIntProperty(key)));
+                // The AMQP delivery-count field only includes prior failed delivery attempts,
+                // whereas JMSXDeliveryCount includes the first/current delivery attempt.
+                int amqpDeliveryCount = msg.getIntProperty(key) - 1;
+                if( amqpDeliveryCount > 0 ) {
+                    header.setDeliveryCount(new UnsignedInteger(amqpDeliveryCount));
+                }
             } else if( key.startsWith("JMSXUserID") ) {
                 String value = msg.getStringProperty(key);
                 props.setUserId(new Binary(value.getBytes("UTF-8")));
@@ -177,13 +186,13 @@ public class JMSMappingOutboundTransformer extends OutboundTransformer {
                 if( apMap==null ) apMap = new HashMap();
                 apMap.put(key, value);
             } else if( key.startsWith(prefixDeliveryAnnotationsKey) ) {
-                if( daMap == null ) daMap = new HashMap();
+                if( daMap == null ) daMap = new HashMap<Symbol, Object>();
                 String name = key.substring(prefixDeliveryAnnotationsKey.length());
-                daMap.put(name, msg.getObjectProperty(key));
+                daMap.put(Symbol.valueOf(name), msg.getObjectProperty(key));
             } else if( key.startsWith(prefixMessageAnnotationsKey) ) {
-                if( maMap==null ) maMap = new HashMap();
+                if( maMap==null ) maMap = new HashMap<Symbol, Object>();
                 String name = key.substring(prefixMessageAnnotationsKey.length());
-                maMap.put(name, msg.getObjectProperty(key));
+                maMap.put(Symbol.valueOf(name), msg.getObjectProperty(key));
             } else if( key.equals(subjectKey) ) {
                 props.setSubject(msg.getStringProperty(key));
             } else if( key.equals(contentTypeKey) ) {
@@ -212,17 +221,7 @@ public class JMSMappingOutboundTransformer extends OutboundTransformer {
         Footer footer=null;
         if( footerMap!=null ) footer = new Footer(footerMap);
 
-        ProtonJMessage amqp = MESSAGE_FACTORY.createMessage(header, da, ma, props, ap, body, footer);
-
-        ByteBuffer buffer = ByteBuffer.wrap(new byte[1024*4]);
-        final DroppingWritableBuffer overflow = new DroppingWritableBuffer();
-        int c = amqp.encode(new CompositeWritableBuffer(new WritableBuffer.ByteBufferWrapper(buffer), overflow));
-        if( overflow.position() > 0 ) {
-            buffer = ByteBuffer.wrap(new byte[1024*4+overflow.position()]);
-            c = amqp.encode(new WritableBuffer.ByteBufferWrapper(buffer));
-        }
-
-        return new EncodedMessage(messageFormat, buffer.array(), 0, c);
+        return (ProtonJMessage) org.apache.qpid.proton.message.Message.Factory.create(header, da, ma, props, ap, body, footer);
     }
 
     private static String destinationAttributes(Destination destination) {

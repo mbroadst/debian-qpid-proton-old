@@ -19,7 +19,6 @@
  *
  */
 
-#include <proton/buffer.h>
 #include <proton/error.h>
 #ifndef __cplusplus
 #include <stdbool.h>
@@ -27,6 +26,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+#include "buffer.h"
 #include "util.h"
 
 struct pn_buffer_t {
@@ -270,6 +271,18 @@ pn_bytes_t pn_buffer_bytes(pn_buffer_t *buf)
     return pn_bytes(buf->size, buf->bytes);
   } else {
     return pn_bytes(0, NULL);
+  }
+}
+
+pn_buffer_memory_t pn_buffer_memory(pn_buffer_t *buf)
+{
+  if (buf) {
+    pn_buffer_defrag(buf);
+    pn_buffer_memory_t r = {buf->size, buf->bytes};
+    return r;
+  } else {
+    pn_buffer_memory_t r = {0, NULL};
+    return r;
   }
 }
 

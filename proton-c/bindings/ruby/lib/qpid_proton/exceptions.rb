@@ -1,4 +1,4 @@
-#
+#--
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,11 +15,11 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-#
+#++
 
-module Qpid
+module Qpid # :nodoc:
 
-  module Proton
+  module Proton # :nodoc:
 
     module Error
 
@@ -59,6 +59,12 @@ module Qpid
     # Represents an invalid, missing or illegal argument while messaging.
     #
     class ArgumentError < ProtonError
+    end
+
+    # Represents that the client has got into an unexpected state during
+    # messaging.
+    #
+    class StateError < ProtonError
     end
 
     # Represents a timeout during messaging.

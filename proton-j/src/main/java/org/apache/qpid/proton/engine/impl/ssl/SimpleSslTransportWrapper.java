@@ -21,9 +21,7 @@
 package org.apache.qpid.proton.engine.impl.ssl;
 
 
-import static org.apache.qpid.proton.engine.impl.ByteBufferUtils.newReadableBuffer;
 import static org.apache.qpid.proton.engine.impl.ByteBufferUtils.newWriteableBuffer;
-import static org.apache.qpid.proton.engine.impl.ByteBufferUtils.pourAll;
 
 import java.nio.ByteBuffer;
 import java.util.logging.Level;
@@ -125,7 +123,13 @@ public class SimpleSslTransportWrapper implements SslTransportWrapper
             } else {
                 ByteBuffer tail = _underlyingInput.tail();
                 _decodedInputBuffer.flip();
+                int limit = _decodedInputBuffer.limit();
+                int overflow = _decodedInputBuffer.remaining() - capacity;
+                if (overflow > 0) {
+                    _decodedInputBuffer.limit(limit - overflow);
+                }
                 tail.put(_decodedInputBuffer);
+                _decodedInputBuffer.limit(limit);
                 _decodedInputBuffer.compact();
                 _underlyingInput.process();
                 capacity = _underlyingInput.capacity();
@@ -325,6 +329,13 @@ public class SimpleSslTransportWrapper implements SslTransportWrapper
     }
 
     @Override
+    public int position()
+    {
+        if (_tail_closed) return Transport.END_OF_STREAM;
+        return _inputBuffer.position();
+    }
+
+    @Override
     public ByteBuffer tail()
     {
         if (_tail_closed) throw new TransportException("tail closed");
@@ -338,22 +349,13 @@ public class SimpleSslTransportWrapper implements SslTransportWrapper
 
         _inputBuffer.flip();
 
-        try
-        {
-            try {
-                unwrapInput();
-            } catch (SSLException e) {
-                throw new TransportException(e);
-            }
-        }
-        catch (TransportException e)
-        {
+        try {
+            unwrapInput();
+        } catch (SSLException e) {
+            _logger.log(Level.WARNING, e.getMessage());
             _inputBuffer.position(_inputBuffer.limit());
             _tail_closed = true;
-            throw e;
-        }
-        finally
-        {
+        } finally {
             _inputBuffer.compact();
         }
     }
@@ -374,17 +376,17 @@ public class SimpleSslTransportWrapper implements SslTransportWrapper
         try {
             wrapOutput();
         } catch (SSLException e) {
-            throw new TransportException(e);
+            _logger.log(Level.WARNING, e.getMessage());
+            _head_closed = true;
         }
 
         _head.limit(_outputBuffer.position());
 
-        if (_head_closed && _outputBuffer.position() == 0)
-        {
+        if (_head_closed && _outputBuffer.position() == 0) {
             return Transport.END_OF_STREAM;
-        } else {
-            return _outputBuffer.position();
         }
+
+        return _outputBuffer.position();
     }
 
     @Override
@@ -408,6 +410,10 @@ public class SimpleSslTransportWrapper implements SslTransportWrapper
     public void close_head()
     {
         _underlyingOutput.close_head();
+        int p = pending();
+        if (p > 0) {
+            pop(p);
+        }
     }
 
 

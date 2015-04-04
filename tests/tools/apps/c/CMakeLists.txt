@@ -19,6 +19,8 @@
 
 include(CheckIncludeFiles)
 
+include_directories(${CMAKE_SOURCE_DIR}/examples/include)
+
 CHECK_INCLUDE_FILES("inttypes.h" INTTYPES_AVAILABLE)
 if (INTTYPES_AVAILABLE)
   list(APPEND PLATFORM_DEFINITIONS "USE_INTTYPES")
@@ -31,17 +33,21 @@ endif (INTTYPES_AVAILABLE)
 
 add_executable(msgr-recv msgr-recv.c msgr-common.c)
 add_executable(msgr-send msgr-send.c msgr-common.c)
+add_executable(reactor-recv reactor-recv.c msgr-common.c)
+add_executable(reactor-send reactor-send.c msgr-common.c)
 
 target_link_libraries(msgr-recv qpid-proton)
 target_link_libraries(msgr-send qpid-proton)
+target_link_libraries(reactor-recv qpid-proton)
+target_link_libraries(reactor-send qpid-proton)
 
 set_target_properties (
-  msgr-recv msgr-send
+  msgr-recv msgr-send reactor-recv reactor-send
   PROPERTIES
   COMPILE_FLAGS "${COMPILE_WARNING_FLAGS} ${COMPILE_LANGUAGE_FLAGS}"
   COMPILE_DEFINITIONS "${PLATFORM_DEFINITIONS}"
 )
 
 if (BUILD_WITH_CXX)
-  set_source_files_properties (msgr-recv.c msgr-send.c msgr-common.c PROPERTIES LANGUAGE CXX)
+  set_source_files_properties (msgr-recv.c msgr-send.c msgr-common.c reactor-recv.c reactor-send.c PROPERTIES LANGUAGE CXX)
 endif (BUILD_WITH_CXX)

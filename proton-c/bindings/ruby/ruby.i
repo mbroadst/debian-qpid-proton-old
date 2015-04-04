@@ -22,12 +22,12 @@
 #include <proton/engine.h>
 #include <proton/message.h>
 #include <proton/sasl.h>
-#include <proton/driver.h>
 #include <proton/messenger.h>
 #include <proton/ssl.h>
-#include <proton/driver_extras.h>
-
 #include <proton/types.h>
+#include <proton/url.h>
+#include <proton/reactor.h>
+#include <proton/handlers.h>
 
 #include <uuid/uuid.h>
 %}
@@ -184,7 +184,7 @@
 
 %typemap (in) pn_decimal64_t
 {
-  $1 = NUM2ULONG($input);
+  $1 = NUM2ULL($input);
 }
 
 %typemap (out) pn_decimal64_t
@@ -236,38 +236,8 @@
     }
 }
 
-int pn_message_load(pn_message_t *msg, char *STRING, size_t LENGTH);
-%ignore pn_message_load;
-
-int pn_message_load_data(pn_message_t *msg, char *STRING, size_t LENGTH);
-%ignore pn_message_load_data;
-
-int pn_message_load_text(pn_message_t *msg, char *STRING, size_t LENGTH);
-%ignore pn_message_load_text;
-
-int pn_message_load_amqp(pn_message_t *msg, char *STRING, size_t LENGTH);
-%ignore pn_message_load_amqp;
-
-int pn_message_load_json(pn_message_t *msg, char *STRING, size_t LENGTH);
-%ignore pn_message_load_json;
-
 int pn_message_encode(pn_message_t *msg, char *OUTPUT, size_t *OUTPUT_SIZE);
 %ignore pn_message_encode;
-
-int pn_message_save(pn_message_t *msg, char *OUTPUT, size_t *OUTPUT_SIZE);
-%ignore pn_message_save;
-
-int pn_message_save_data(pn_message_t *msg, char *OUTPUT, size_t *OUTPUT_SIZE);
-%ignore pn_message_save_data;
-
-int pn_message_save_text(pn_message_t *msg, char *OUTPUT, size_t *OUTPUT_SIZE);
-%ignore pn_message_save_text;
-
-int pn_message_save_amqp(pn_message_t *msg, char *OUTPUT, size_t *OUTPUT_SIZE);
-%ignore pn_message_save_amqp;
-
-int pn_message_save_json(pn_message_t *msg, char *OUTPUT, size_t *OUTPUT_SIZE);
-%ignore pn_message_save_json;
 
 ssize_t pn_link_send(pn_link_t *transport, char *STRING, size_t LENGTH);
 %ignore pn_link_send;
@@ -319,24 +289,10 @@ ssize_t pn_transport_input(pn_transport_t *transport, char *STRING, size_t LENGT
     pn_delivery_tag_t tag = pn_delivery_tag(delivery);
     *ALLOC_OUTPUT = malloc(tag.size);
     *ALLOC_SIZE = tag.size;
-    memcpy(*ALLOC_OUTPUT, tag.bytes, tag.size);
+    memcpy(*ALLOC_OUTPUT, tag.start, tag.size);
   }
 %}
 %ignore pn_delivery_tag;
-
-%rename(pn_message_data) wrap_pn_message_data;
-%inline %{
-  int wrap_pn_message_data(char *STRING, size_t LENGTH, char *OUTPUT, size_t *OUTPUT_SIZE) {
-    ssize_t sz = pn_message_data(OUTPUT, *OUTPUT_SIZE, STRING, LENGTH);
-    if (sz >= 0) {
-      *OUTPUT_SIZE = sz;
-    } else {
-      *OUTPUT_SIZE = 0;
-    }
-    return sz;
-  }
-%}
-%ignore pn_message_data;
 
 bool pn_ssl_get_cipher_name(pn_ssl_t *ssl, char *OUTPUT, size_t MAX_OUTPUT_SIZE);
 %ignore pn_ssl_get_cipher_name;
@@ -344,5 +300,155 @@ bool pn_ssl_get_cipher_name(pn_ssl_t *ssl, char *OUTPUT, size_t MAX_OUTPUT_SIZE)
 bool pn_ssl_get_protocol_name(pn_ssl_t *ssl, char *OUTPUT, size_t MAX_OUTPUT_SIZE);
 %ignore pn_ssl_get_protocol_name;
 
+%inline %{
+#if defined(RUBY20) || defined(RUBY21)
+
+  typedef void *non_blocking_return_t;
+#define RB_BLOCKING_CALL rb_thread_call_without_gvl
+
+#elif defined(RUBY19)
+
+    typedef VALUE non_blocking_return_t;
+#define RB_BLOCKING_CALL rb_thread_blocking_region
+
+#endif
+  %}
+
+%rename(pn_messenger_send) wrap_pn_messenger_send;
+%rename(pn_messenger_recv) wrap_pn_messenger_recv;
+%rename(pn_messenger_work) wrap_pn_messenger_work;
+
+%inline %{
+
+#if defined(RB_BLOCKING_CALL)
+
+    static non_blocking_return_t pn_messenger_send_no_gvl(void *args) {
+    VALUE result = Qnil;
+    pn_messenger_t *messenger = (pn_messenger_t *)((void **)args)[0];
+    int *limit = (int *)((void **)args)[1];
+
+    int rc = pn_messenger_send(messenger, *limit);
+
+    result = INT2NUM(rc);
+    return (non_blocking_return_t )result;
+    }
+
+    static non_blocking_return_t pn_messenger_recv_no_gvl(void *args) {
+    VALUE result = Qnil;
+    pn_messenger_t *messenger = (pn_messenger_t *)((void **)args)[0];
+    int *limit = (int *)((void **)args)[1];
+
+    int rc = pn_messenger_recv(messenger, *limit);
+
+    result = INT2NUM(rc);
+    return (non_blocking_return_t )result;
+  }
+
+    static non_blocking_return_t pn_messenger_work_no_gvl(void *args) {
+      VALUE result = Qnil;
+      pn_messenger_t *messenger = (pn_messenger_t *)((void **)args)[0];
+      int *timeout = (int *)((void **)args)[1];
+
+      int rc = pn_messenger_work(messenger, *timeout);
+
+      result = INT2NUM(rc);
+      return (non_blocking_return_t )result;
+    }
+
+#endif
+
+  int wrap_pn_messenger_send(pn_messenger_t *messenger, int limit) {
+    int result = 0;
+
+#if defined(RB_BLOCKING_CALL)
+
+    // only release the gil if we're blocking
+    if(pn_messenger_is_blocking(messenger)) {
+      VALUE rc;
+      void* args[2];
+
+      args[0] = messenger;
+      args[1] = &limit;
+
+      rc = RB_BLOCKING_CALL(pn_messenger_send_no_gvl,
+                            &args, RUBY_UBF_PROCESS, NULL);
+
+      if(RTEST(rc))
+        {
+          result = FIX2INT(rc);
+        }
+    }
+
+#else // !defined(RB_BLOCKING_CALL)
+    result = pn_messenger_send(messenger, limit);
+#endif // defined(RB_BLOCKING_CALL)
+
+    return result;
+  }
+
+  int wrap_pn_messenger_recv(pn_messenger_t *messenger, int limit) {
+    int result = 0;
+
+#if defined(RB_BLOCKING_CALL)
+    // only release the gil if we're blocking
+    if(pn_messenger_is_blocking(messenger)) {
+      VALUE rc;
+      void* args[2];
+
+      args[0] = messenger;
+      args[1] = &limit;
+
+      rc = RB_BLOCKING_CALL(pn_messenger_recv_no_gvl,
+                            &args, RUBY_UBF_PROCESS, NULL);
+
+      if(RTEST(rc))
+        {
+          result = FIX2INT(rc);
+        }
+
+    } else {
+      result = pn_messenger_recv(messenger, limit);
+    }
+#else // !defined(RB_BLOCKING_CALL)
+    result = pn_messenger_recv(messenger, limit);
+#endif // defined(RB_BLOCKING_CALL)
+
+      return result;
+  }
+
+  int wrap_pn_messenger_work(pn_messenger_t *messenger, int timeout) {
+    int result = 0;
+
+#if defined(RB_BLOCKING_CALL)
+    // only release the gil if we're blocking
+    if(timeout) {
+      VALUE rc;
+      void* args[2];
+
+      args[0] = messenger;
+      args[1] = &timeout;
+
+      rc = RB_BLOCKING_CALL(pn_messenger_work_no_gvl,
+                            &args, RUBY_UBF_PROCESS, NULL);
+
+      if(RTEST(rc))
+        {
+          result = FIX2INT(rc);
+        }
+    } else {
+      result = pn_messenger_work(messenger, timeout);
+    }
+#else
+    result = pn_messenger_work(messenger, timeout);
+#endif
+
+    return result;
+  }
+
+%}
+
+%ignore pn_messenger_send;
+%ignore pn_messenger_recv;
+%ignore pn_messenger_work;
 
 %include "proton/cproton.i"
